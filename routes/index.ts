@@ -13,6 +13,7 @@ import { archivoRoutes } from '../helpers/archivosHelper';
 import { transaccionesRoutes } from '../helpers/transaccionesHelper';
 import { inventarioRoutes } from '../helpers/inventarioHelper';
 import { exportRoutes } from '../helpers/exportHelper'; 
+import { boardRoutes } from '../helpers/boards.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -47,3 +48,4 @@ routes.route('/', stockRoutes);
 routes.route('/', transaccionesRoutes);
 routes.route('/', archivoRoutes);
 routes.route('/', exportRoutes);
+routes.route('/api', boardRoutes);
