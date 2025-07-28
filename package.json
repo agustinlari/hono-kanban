@@ -1,0 +1,30 @@
+{
+  "name": "hono-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx watch index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hono/node-server": "^1.17.1",
+    "dotenv": "^16.5.0",
+    "hono": "^4.7.11",
+    "papaparse": "^5.5.3",
+    "pg": "^8.16.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/papaparse": "^5.3.16",
+    "@types/pg": "^8.15.4",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.3"
+  }
+}

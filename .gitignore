@@ -1,0 +1,12 @@
+node_modules/
+backups/
+uploads_data/
+config/database.ts
+config/env.ts
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.js
+*.js.map
+*.gpg
