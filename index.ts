@@ -7,7 +7,6 @@ import { serve } from '@hono/node-server';
 import { cors } from 'hono/cors'; // Importar CORS
 import { routes } from './routes';
 import { PORT } from './config/env';
-import { sqlExecutorHelperRoutes } from './helpers/sqlExecutor'; // <--- CAMBIO AQUÍ
 import type { Variables } from './types';
 
 
@@ -28,8 +27,6 @@ console.log("Middleware CORS configurado globalmente.");
 
 //Montar todas las rutas
 app.route('/', routes);
-app.route('/admin/sql', sqlExecutorHelperRoutes);
-
 console.log(`Configurando para el puerto: ${PORT}`);
 console.log("A punto de llamar a serve()...");
 

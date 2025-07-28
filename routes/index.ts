@@ -8,11 +8,7 @@ import type { Variables } from '../types';
 
 // Importa todos tus helpers de rutas
 import { authRoutes } from '../helpers/auth.helper';
-import { stockRoutes } from '../helpers/stockHelper';
 import { archivoRoutes } from '../helpers/archivosHelper';
-import { transaccionesRoutes } from '../helpers/transaccionesHelper';
-import { inventarioRoutes } from '../helpers/inventarioHelper';
-import { exportRoutes } from '../helpers/exportHelper'; 
 import { boardRoutes } from '../helpers/boards.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
@@ -43,9 +39,5 @@ routes.use(`/public/${uploadsFolderName}/*`, serveStatic({
 
 // --- Montar todas las rutas modulares de la API ---
 routes.route('/', authRoutes);
-routes.route('/', inventarioRoutes);
-routes.route('/', stockRoutes);
-routes.route('/', transaccionesRoutes);
 routes.route('/', archivoRoutes);
-routes.route('/', exportRoutes);
 routes.route('/api', boardRoutes);
