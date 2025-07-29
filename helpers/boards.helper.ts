@@ -85,6 +85,24 @@ class BoardService {
     return finalBoard;
   }
 
+    static async getListsByBoardId(boardId: number): Promise<Omit<List, 'cards'>[] | null> {
+    // Primero, comprobamos si el tablero existe para dar un buen error 404
+    const boardCheck = await pool.query('SELECT id FROM boards WHERE id = $1', [boardId]);
+    if (boardCheck.rowCount === 0) {
+      return null; // Devuelve null para que el controlador sepa que es un 404
+    }
+
+    // Si el tablero existe, obtenemos sus listas ordenadas por posición
+    const query = `
+      SELECT id, title, position, board_id, created_at, updated_at 
+      FROM lists 
+      WHERE board_id = $1 
+      ORDER BY position ASC;
+    `;
+    const result = await pool.query(query, [boardId]);
+    
+    return result.rows;
+  }
   /**
    * Crea un nuevo tablero
    */
@@ -113,6 +131,28 @@ class BoardController {
     } catch (error: any) {
       console.error('Error en BoardController.getAll:', error);
       return c.json({ error: 'Error al obtener los tableros' }, 500);
+    }
+  }
+
+  static async getListsOfBoard(c: Context) {
+    try {
+      const boardId = parseInt(c.req.param('id'));
+      if (isNaN(boardId)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      const lists = await BoardService.getListsByBoardId(boardId);
+
+      // El servicio devuelve null si el tablero no existe
+      if (lists === null) {
+        return c.json({ error: `Tablero con ID ${boardId} no encontrado` }, 404);
+      }
+      
+      return c.json(lists);
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.getListsOfBoard para el id ${c.req.param('id')}:`, error);
+      return c.json({ error: 'Error al obtener las listas del tablero' }, 500);
     }
   }
 
@@ -159,3 +199,4 @@ boardRoutes.use('*', authMiddleware);
 boardRoutes.get('/boards', BoardController.getAll);
 boardRoutes.get('/boards/:id', BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);
+boardRoutes.get('/boards/:id/lists', BoardController.getListsOfBoard);
