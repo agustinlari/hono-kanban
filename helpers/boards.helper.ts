@@ -195,7 +195,6 @@ export const boardRoutes = new Hono<{ Variables: Variables }>();
 
 // Todas las rutas de tableros requerirán autenticación
 boardRoutes.use('*', authMiddleware);
-
 boardRoutes.get('/boards', BoardController.getAll);
 boardRoutes.get('/boards/:id', BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);

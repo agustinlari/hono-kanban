@@ -1,13 +1,14 @@
+// src/helpers/archivosHelper.ts
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { authMiddleware } from '../middleware/auth'; // VERIFICA ESTA RUTA
-import type { Variables } from '../types';           // VERIFICA ESTA RUTA
+import { authMiddleware } from '../middleware/auth';
+import type { Variables } from '../types';
 
 // Importaciones necesarias de la lógica del servicio y controlador
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { pool } from '../config/database';      // VERIFICA ESTA RUTA
+import { pool } from '../config/database';
 import { Readable } from 'stream';
 import { createReadStream } from 'fs';
 
@@ -22,8 +23,15 @@ if (!UPLOAD_DIR_FROM_ENV) {
 export const UPLOADS_DIR = path.resolve(UPLOAD_DIR_FROM_ENV || 'uploads');
 console.log(`Directorio de subida de archivos configurado en: ${UPLOADS_DIR}`);
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB para permitir más tipos de archivos
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf', 'text/plain', 'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+];
+const IMAGE_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
 
 // =================================================================
@@ -39,6 +47,15 @@ export interface ArchivoMetadata {
   tamano_bytes: number;
   usuario_id: number;
   fecha_subida: Date;
+  is_thumbnail?: boolean;
+}
+
+export interface CardAttachment {
+  id: number;
+  card_id: string;
+  archivo_id: number;
+  is_thumbnail: boolean;
+  created_at: Date;
 }
 
 
@@ -59,7 +76,8 @@ class ArchivoService {
   static async guardarArchivoLocal(
     file: File,
     userId: number,
-    refArticulo: string | null
+    cardId: string | null = null,
+    isThumbnail: boolean = false
   ): Promise<ArchivoMetadata> {
     await this.ensureUploadDirExists();
 
@@ -105,12 +123,36 @@ class ArchivoService {
         fecha_subida: archivoResult.rows[0].fecha_subida,
       };
 
-      if (refArticulo) {
+      // Si se proporciona cardId, crear la asociación con la tarjeta
+      if (cardId) {
+        // Verificar que la tarjeta existe
+        const cardCheck = await client.query('SELECT id FROM cards WHERE id = $1', [cardId]);
+        if (cardCheck.rowCount === 0) {
+          throw new Error('La tarjeta especificada no existe.');
+        }
+
         const asociacionQuery = `
-          INSERT INTO inventario_archivos (inventario_ref_articulo, archivo_id)
-          VALUES ($1, $2)
+          INSERT INTO card_attachments (card_id, archivo_id, is_thumbnail)
+          VALUES ($1, $2, $3)
         `;
-        await client.query(asociacionQuery, [refArticulo, nuevoArchivo.id]);
+        await client.query(asociacionQuery, [cardId, nuevoArchivo.id, isThumbnail]);
+
+        // Si es un thumbnail, actualizar el image_url de la tarjeta
+        if (isThumbnail) {
+          const imageUrl = `/archivos/${nuevoArchivo.id}/descargar`;
+          console.log(`Actualizando image_url de tarjeta ${cardId} con URL: ${imageUrl}`);
+          
+          const updateResult = await client.query(
+            'UPDATE cards SET image_url = $1, updated_at = NOW() WHERE id = $2',
+            [imageUrl, cardId]
+          );
+          
+          console.log(`Filas afectadas al actualizar image_url: ${updateResult.rowCount}`);
+          
+          if (updateResult.rowCount === 0) {
+            console.warn(`No se pudo actualizar image_url para la tarjeta ${cardId}`);
+          }
+        }
       }
 
       await client.query('COMMIT');
@@ -183,34 +225,47 @@ class ArchivoService {
 
   // Añade este método DENTRO de la clase ArchivoService
 
-static async desvincularYLimpiarArchivoDeArticulo(refArticulo: string, archivoId: number): Promise<{ mensaje: string }> {
+  static async desvincularYLimpiarArchivoDeCard(cardId: string, archivoId: number): Promise<{ mensaje: string }> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Paso 1: Intentar borrar la asociación específica
-      const deleteLinkResult = await client.query(
-        'DELETE FROM inventario_archivos WHERE inventario_ref_articulo = $1 AND archivo_id = $2',
-        [refArticulo, archivoId]
+      // Paso 1: Obtener información sobre la asociación
+      const attachmentInfo = await client.query(
+        'SELECT is_thumbnail FROM card_attachments WHERE card_id = $1 AND archivo_id = $2',
+        [cardId, archivoId]
       );
 
-      if (deleteLinkResult.rowCount === 0) {
-        // Si no se borró ninguna fila, es porque el enlace no existía.
-        // No es un error, simplemente informamos y terminamos.
-        await client.query('ROLLBACK'); // Deshacemos por si acaso, aunque no debería haber cambios.
-        return { mensaje: 'La imagen no estaba asociada a este artículo.' };
+      if (attachmentInfo.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return { mensaje: 'El archivo no estaba asociado a esta tarjeta.' };
       }
 
-      // Paso 2: Verificar si el archivo quedó huérfano
+      const isThumbnail = attachmentInfo.rows[0].is_thumbnail;
+
+      // Paso 2: Borrar la asociación específica
+      await client.query(
+        'DELETE FROM card_attachments WHERE card_id = $1 AND archivo_id = $2',
+        [cardId, archivoId]
+      );
+
+      // Paso 3: Si era thumbnail, limpiar la URL de la tarjeta
+      if (isThumbnail) {
+        await client.query(
+          'UPDATE cards SET image_url = NULL WHERE id = $1',
+          [cardId]
+        );
+      }
+
+      // Paso 4: Verificar si el archivo quedó huérfano
       const checkOrphanResult = await client.query(
-        'SELECT COUNT(*) FROM inventario_archivos WHERE archivo_id = $1',
+        'SELECT COUNT(*) FROM card_attachments WHERE archivo_id = $1',
         [archivoId]
       );
       const associationsCount = parseInt(checkOrphanResult.rows[0].count, 10);
 
-      // Paso 3: Si está huérfano (count === 0), borrarlo por completo
+      // Paso 5: Si está huérfano, borrarlo por completo
       if (associationsCount === 0) {
-        // Obtenemos la ruta del archivo para poder borrarlo del disco
         const fileMetaResult = await client.query(
           'SELECT ruta_relativa FROM archivos WHERE id = $1',
           [archivoId]
@@ -220,37 +275,72 @@ static async desvincularYLimpiarArchivoDeArticulo(refArticulo: string, archivoId
           const rutaRelativa = fileMetaResult.rows[0].ruta_relativa;
           const rutaCompleta = path.join(UPLOADS_DIR, rutaRelativa);
 
-          // Borramos la entrada de la tabla 'archivos'
-          // ON DELETE CASCADE se encargará de cualquier otra tabla que dependa de esta.
           await client.query('DELETE FROM archivos WHERE id = $1', [archivoId]);
 
-          // Intentamos borrar el archivo físico del disco
           try {
             await fs.unlink(rutaCompleta);
           } catch (unlinkError: any) {
             if (unlinkError.code === 'ENOENT') {
               console.warn(`Se borró el registro de la BD, pero el archivo físico no se encontró en: ${rutaCompleta}`);
             } else {
-              // Si falla por otra razón (ej. permisos), lanzamos el error para hacer rollback
               throw unlinkError;
             }
           }
            await client.query('COMMIT');
-           return { mensaje: 'Imagen desvinculada y archivo huérfano eliminado con éxito.' };
+           return { mensaje: 'Archivo desvinculado y eliminado con éxito.' };
         }
       }
 
-      // Si llegamos aquí, el archivo no estaba huérfano.
       await client.query('COMMIT');
-      return { mensaje: 'Imagen desvinculada con éxito. El archivo se mantiene porque está en uso por otros artículos.' };
+      return { mensaje: 'Archivo desvinculado con éxito. El archivo se mantiene porque está en uso por otras tarjetas.' };
 
     } catch (error) {
       await client.query('ROLLBACK');
       console.error("Error en la transacción al desvincular archivo, cambios revertidos:", error);
-      throw error; // Lanzamos el error para que el controlador lo capture
+      throw error;
     } finally {
       client.release();
     }
+  }
+
+  static async obtenerArchivosDeCard(cardId: string): Promise<(ArchivoMetadata & CardAttachment)[]> {
+    const query = `
+      SELECT a.*, ca.is_thumbnail, ca.created_at as attachment_created_at
+      FROM archivos a
+      INNER JOIN card_attachments ca ON a.id = ca.archivo_id
+      WHERE ca.card_id = $1
+      ORDER BY ca.is_thumbnail DESC, ca.created_at ASC
+    `;
+    
+    const result = await pool.query(query, [cardId]);
+    return result.rows.map(row => ({
+      ...row,
+      attachment_created_at: row.attachment_created_at
+    }));
+  }
+
+  static async verificarEstadoCard(cardId: string): Promise<any> {
+    console.log(`Verificando estado de la tarjeta: ${cardId}`);
+    
+    // Obtener info de la tarjeta
+    const cardResult = await pool.query('SELECT id, title, image_url FROM cards WHERE id = $1', [cardId]);
+    
+    // Obtener attachments
+    const attachmentsResult = await pool.query(`
+      SELECT ca.*, a.nombre_original, a.mimetype 
+      FROM card_attachments ca 
+      JOIN archivos a ON ca.archivo_id = a.id 
+      WHERE ca.card_id = $1
+    `, [cardId]);
+    
+    const estado = {
+      tarjeta: cardResult.rows[0] || null,
+      attachments: attachmentsResult.rows,
+      thumbnails: attachmentsResult.rows.filter(a => a.is_thumbnail)
+    };
+    
+    console.log('Estado de la tarjeta:', JSON.stringify(estado, null, 2));
+    return estado;
   }
 }
 
@@ -267,7 +357,8 @@ class ArchivoController {
     try {
       const formData = await c.req.formData();
       const file = formData.get('archivo') as File | null;
-      const refArticulo = formData.get('refArticulo') as string | null;
+      const cardId = formData.get('cardId') as string | null;
+      const isThumbnail = formData.get('isThumbnail') === 'true';
 
       if (!file) {
         return c.json({ error: 'No se proporcionó ningún archivo' }, 400);
@@ -279,21 +370,85 @@ class ArchivoController {
         return c.json({ error: `Tipo de archivo no permitido. Permitidos: ${ALLOWED_MIME_TYPES.join(', ')}` }, 415);
       }
       
-      const metadata = await ArchivoService.guardarArchivoLocal(file, user.userId, refArticulo);
+      // Si se marca como thumbnail, debe ser una imagen
+      if (isThumbnail && !IMAGE_MIME_TYPES.includes(file.type)) {
+        return c.json({ error: 'Los thumbnails deben ser archivos de imagen' }, 400);
+      }
       
-      const mensaje = refArticulo 
-        ? 'Archivo subido y asociado con éxito' 
-        : 'Archivo subido con éxito (sin asociación)';
+      console.log(`Subiendo archivo: ${file.name}, cardId: ${cardId}, isThumbnail: ${isThumbnail}`);
+      
+      const metadata = await ArchivoService.guardarArchivoLocal(file, user.userId, cardId, isThumbnail);
+      
+      let mensaje = 'Archivo subido con éxito';
+      if (cardId) {
+        mensaje = isThumbnail 
+          ? 'Thumbnail subido y asociado con éxito' 
+          : 'Archivo subido y asociado con éxito';
+      }
         
       return c.json({ mensaje, data: metadata }, 201);
     } catch (error: any) {
       console.error('Error al subir archivo:', error);
-      // Código '23503' de PostgreSQL para foreign_key_violation
       if (error.code === '23503') { 
-          return c.json({ error: 'La referencia del artículo proporcionada no existe.' }, 404);
+          return c.json({ error: 'La tarjeta proporcionada no existe.' }, 404);
+      }
+      if (error.message === 'La tarjeta especificada no existe.') {
+        return c.json({ error: error.message }, 404);
       }
       const errorMessage = error instanceof Error ? error.message : 'Error interno al procesar el archivo';
       return c.json({ error: errorMessage }, 500);
+    }
+  }
+
+  static async obtenerArchivosCard(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const cardId = c.req.param('cardId');
+    if (!cardId) return c.json({ error: 'ID de tarjeta requerido' }, 400);
+
+    try {
+      const archivos = await ArchivoService.obtenerArchivosDeCard(cardId);
+      return c.json({ archivos });
+    } catch (error: any) {
+      console.error(`Error al obtener archivos de la tarjeta ${cardId}:`, error);
+      return c.json({ error: 'Error interno al obtener los archivos' }, 500);
+    }
+  }
+
+  static async desvincularArchivoDeCard(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const cardId = c.req.param('cardId');
+    const archivoId = parseInt(c.req.param('archivoId'));
+    
+    if (!cardId || isNaN(archivoId)) {
+      return c.json({ error: 'ID de tarjeta y archivo requeridos' }, 400);
+    }
+
+    try {
+      const resultado = await ArchivoService.desvincularYLimpiarArchivoDeCard(cardId, archivoId);
+      return c.json(resultado);
+    } catch (error: any) {
+      console.error(`Error al desvincular archivo ${archivoId} de tarjeta ${cardId}:`, error);
+      return c.json({ error: 'Error interno al desvincular el archivo' }, 500);
+    }
+  }
+
+  static async verificarEstadoCard(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const cardId = c.req.param('cardId');
+    if (!cardId) return c.json({ error: 'ID de tarjeta requerido' }, 400);
+
+    try {
+      const estado = await ArchivoService.verificarEstadoCard(cardId);
+      return c.json(estado);
+    } catch (error: any) {
+      console.error(`Error al verificar estado de tarjeta ${cardId}:`, error);
+      return c.json({ error: 'Error interno al verificar el estado' }, 500);
     }
   }
 
@@ -356,3 +511,8 @@ export const archivoRoutes = new Hono<{ Variables: Variables }>();
 archivoRoutes.post('/archivos/subir', authMiddleware, ArchivoController.subirArchivo);
 archivoRoutes.get('/archivos/:id/descargar', authMiddleware, ArchivoController.descargarArchivo);
 archivoRoutes.delete('/archivos/:id', authMiddleware, ArchivoController.borrarArchivo);
+
+// Rutas específicas para tarjetas
+archivoRoutes.get('/cards/:cardId/archivos', authMiddleware, ArchivoController.obtenerArchivosCard);
+archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', authMiddleware, ArchivoController.desvincularArchivoDeCard);
+archivoRoutes.get('/cards/:cardId/estado', authMiddleware, ArchivoController.verificarEstadoCard);

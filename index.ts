@@ -19,7 +19,7 @@ console.log("Instancia de Hono creada.");
 app.use('*', cors({
   origin: '*', // O un array de orígenes permitidos: ['http://localhost:3001', 'https://tufrontend.com']
   allowHeaders: ['Authorization', 'X-Client-Info', 'Apikey', 'Content-Type'], // Headers que usaba Supabase
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Métodos que usaba Supabase
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], // Métodos que usaba Supabase
   maxAge: 86400, // Cache preflight requests por 1 día
   credentials: true, // Si necesitas enviar cookies o Authorization header con credenciales
 }));

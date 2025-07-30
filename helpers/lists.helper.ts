@@ -183,7 +183,6 @@ listRoutes.use('*', authMiddleware);
 // Endpoint para crear una nueva lista
 listRoutes.post('/lists', ListController.create);
 
-
 // Endpoint para actualizar el título de una lista
 listRoutes.put('/lists/:id', ListController.updateTitle);
 

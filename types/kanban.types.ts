@@ -55,3 +55,38 @@ export interface UpdateCardPositionPayload {
     cardId: string;
     newIndex: number;
 }
+
+export interface UpdateCardPayload {
+  title?: string;
+  description?: string;
+  image_url?: string;
+  // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
+}
+
+export interface MoveCardPayload {
+  cardId: string;       // El ID de la tarjeta que se mueve
+  sourceListId: number; // La lista de origen
+  targetListId: number; // La lista de destino (puede ser la misma que la de origen)
+  newIndex: number;     // La nueva posición (índice) en la lista de destino
+}
+
+// Interfaces para el manejo de archivos en tarjetas
+export interface CardAttachmentPayload {
+  cardId: string;
+  isThumbnail?: boolean;
+}
+
+export interface CardAttachmentResponse {
+  id: number;
+  card_id: string;
+  archivo_id: number;
+  is_thumbnail: boolean;
+  created_at: Date;
+  // Metadatos del archivo
+  nombre_original: string;
+  nombre_guardado: string;
+  ruta_relativa: string;
+  mimetype: string;
+  tamano_bytes: number;
+  fecha_subida: Date;
+}
