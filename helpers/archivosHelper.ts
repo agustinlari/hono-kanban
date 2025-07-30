@@ -460,7 +460,26 @@ class ArchivoController {
     if (isNaN(id)) return c.json({ error: 'ID de archivo inválido' }, 400);
 
     try {
-      const metadata = await ArchivoService.obtenerMetadataArchivo(id, user.userId);
+      // Primero verificar si el archivo está asociado a alguna tarjeta (acceso público)
+      const cardAssociationQuery = `
+        SELECT COUNT(*) as count 
+        FROM card_attachments 
+        WHERE archivo_id = $1
+      `;
+      const cardAssociation = await pool.query(cardAssociationQuery, [id]);
+      const isCardAttachment = parseInt(cardAssociation.rows[0].count) > 0;
+
+      let metadata;
+      if (isCardAttachment) {
+        // Si está asociado a una tarjeta, permitir acceso sin verificar usuario
+        const metadataQuery = 'SELECT * FROM archivos WHERE id = $1';
+        const result = await pool.query(metadataQuery, [id]);
+        metadata = result.rows[0] || null;
+      } else {
+        // Si no está asociado a tarjetas, verificar que pertenezca al usuario
+        metadata = await ArchivoService.obtenerMetadataArchivo(id, user.userId);
+      }
+
       if (!metadata) return c.json({ error: 'Archivo no encontrado o acceso denegado' }, 404);
 
       const rutaAbsoluta = await ArchivoService.obtenerRutaAbsoluta(metadata.ruta_relativa);
@@ -473,7 +492,14 @@ class ArchivoController {
       const webStream = Readable.toWeb(nodeStream) as ReadableStream;
 
       c.header('Content-Type', metadata.mimetype);
-      c.header('Content-Disposition', `attachment; filename="${metadata.nombre_original}"`);
+      
+      // Para imágenes de tarjetas, mostrar inline en lugar de forzar descarga
+      if (isCardAttachment && metadata.mimetype.startsWith('image/')) {
+        c.header('Content-Disposition', `inline; filename="${metadata.nombre_original}"`);
+      } else {
+        c.header('Content-Disposition', `attachment; filename="${metadata.nombre_original}"`);
+      }
+      
       c.header('Content-Length', metadata.tamano_bytes.toString());
 
       return c.body(webStream);
