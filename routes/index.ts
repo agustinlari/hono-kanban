@@ -10,8 +10,9 @@ import type { Variables } from '../types';
 import { authRoutes } from '../helpers/auth.helper';
 import { archivoRoutes } from '../helpers/archivosHelper';
 import { boardRoutes } from '../helpers/boards.helper';
-import { listRoutes } from '../helpers/lists.helper'; // <-- Importa el nuevo helper
-import { cardRoutes } from '../helpers/cards.helper'; // <-- Importa el nuevo helper
+import { listRoutes } from '../helpers/lists.helper';
+import { cardRoutes } from '../helpers/cards.helper';
+import { labelRoutes } from '../helpers/labels.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -43,5 +44,6 @@ routes.use(`/public/${uploadsFolderName}/*`, serveStatic({
 routes.route('/', authRoutes);
 routes.route('/', archivoRoutes);
 routes.route('/', boardRoutes);
-routes.route('/', listRoutes); // <-- Añade la nueva ruta
-routes.route('/', cardRoutes); // <-- Añade la nueva ruta
+routes.route('/', listRoutes);
+routes.route('/', cardRoutes);
+routes.route('/', labelRoutes);

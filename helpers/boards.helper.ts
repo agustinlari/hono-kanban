@@ -5,7 +5,9 @@ import type { Context } from 'hono';
 import { pool } from '../config/database'; 
 import { authMiddleware } from '../middleware/auth';
 import type { Variables } from '../types';
-import type { Board, List, Card, CreateBoardPayload } from '../types/kanban.types'; // <-- Nuestros nuevos tipos
+import type { Board, List, Card, CreateBoardPayload } from '../types/kanban.types';
+import fs from 'fs/promises';
+import path from 'path';
 
 // ================================
 // Lógica de Servicio (BoardService)
@@ -43,7 +45,38 @@ class BoardService {
     `;
     const listsAndCardsResult = await pool.query(listsAndCardsQuery, [id]);
 
-    // 3. Procesar los resultados para anidar los datos correctamente
+    // 3. Obtener todas las etiquetas de las tarjetas de este tablero
+    const labelsQuery = `
+      SELECT 
+        cl.card_id,
+        l.id as label_id, l.name as label_name, l.color as label_color,
+        l.created_at as label_created_at, l.updated_at as label_updated_at
+      FROM card_labels cl
+      INNER JOIN labels l ON cl.label_id = l.id
+      INNER JOIN cards c ON cl.card_id = c.id
+      INNER JOIN lists lst ON c.list_id = lst.id
+      WHERE lst.board_id = $1
+      ORDER BY l.name;
+    `;
+    const labelsResult = await pool.query(labelsQuery, [id]);
+
+    // 4. Crear un mapa de etiquetas por tarjeta
+    const cardLabelsMap = new Map<string, any[]>();
+    for (const labelRow of labelsResult.rows) {
+      if (!cardLabelsMap.has(labelRow.card_id)) {
+        cardLabelsMap.set(labelRow.card_id, []);
+      }
+      cardLabelsMap.get(labelRow.card_id)!.push({
+        id: labelRow.label_id,
+        board_id: id,
+        name: labelRow.label_name,
+        color: labelRow.label_color,
+        created_at: labelRow.label_created_at,
+        updated_at: labelRow.label_updated_at
+      });
+    }
+
+    // 5. Procesar los resultados para anidar los datos correctamente
     const listsMap = new Map<number, List>();
     for (const row of listsAndCardsResult.rows) {
       // Si la lista no está en nuestro mapa, la añadimos
@@ -71,7 +104,8 @@ class BoardService {
           image_url: row.image_url,
           list_id: row.list_id,
           created_at: new Date(),
-          updated_at: new Date()
+          updated_at: new Date(),
+          labels: cardLabelsMap.get(row.card_id) || []
         });
       }
     }
@@ -117,6 +151,68 @@ class BoardService {
         VALUES ($1, $2) RETURNING *`;
       const result = await pool.query(query, [name, description]);
       return result.rows[0];
+  }
+
+  /**
+   * Elimina un tablero y todos sus datos relacionados (listas, tarjetas, archivos)
+   */
+  static async deleteBoard(id: number): Promise<boolean> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Verificar que el tablero existe
+      const boardCheck = await client.query('SELECT id FROM boards WHERE id = $1', [id]);
+      if (boardCheck.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return false; // El tablero no existe
+      }
+
+      // 2. Obtener todos los archivos asociados a las tarjetas de este tablero para borrarlos del disco
+      const filesQuery = `
+        SELECT DISTINCT a.id, a.ruta_relativa
+        FROM archivos a
+        INNER JOIN card_attachments ca ON a.id = ca.archivo_id
+        INNER JOIN cards c ON ca.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        WHERE l.board_id = $1
+      `;
+      const filesResult = await client.query(filesQuery, [id]);
+      const filesToDelete = filesResult.rows;
+
+      // 3. Eliminar el tablero (las claves foráneas con ON DELETE CASCADE se encargarán del resto)
+      // Orden de eliminación por las foreign keys:
+      // boards -> lists -> cards -> card_attachments -> archivos
+      await client.query('DELETE FROM boards WHERE id = $1', [id]);
+
+      await client.query('COMMIT');
+
+      // 4. Borrar archivos físicos del disco (después del commit para evitar inconsistencias)
+      for (const file of filesToDelete) {
+        try {
+          const rutaCompleta = path.join(process.env.UPLOAD_DIR || 'uploads', file.ruta_relativa);
+          await fs.unlink(rutaCompleta);
+          console.log(`Archivo físico eliminado: ${rutaCompleta}`);
+        } catch (unlinkError: any) {
+          if (unlinkError.code === 'ENOENT') {
+            console.warn(`Archivo físico no encontrado (ya fue eliminado): ${file.ruta_relativa}`);
+          } else {
+            console.error(`Error al eliminar archivo físico ${file.ruta_relativa}:`, unlinkError);
+            // No lanzamos el error aquí porque la transacción ya se hizo commit
+          }
+        }
+      }
+
+      console.log(`Tablero ${id} eliminado exitosamente con ${filesToDelete.length} archivos`);
+      return true;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en BoardService.deleteBoard:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 
@@ -186,6 +282,31 @@ class BoardController {
         return c.json({ error: 'No se pudo crear el tablero' }, 500);
     }
   }
+
+  /**
+   * Elimina un tablero específico por su ID
+   */
+  static async delete(c: Context) {
+    try {
+      const id = parseInt(c.req.param('id'));
+      if (isNaN(id)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      const wasDeleted = await BoardService.deleteBoard(id);
+
+      if (!wasDeleted) {
+        return c.json({ error: `Tablero con ID ${id} no encontrado` }, 404);
+      }
+
+      // Devolver 204 No Content para indicar eliminación exitosa sin contenido
+      return c.body(null, 204);
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.delete para el id ${c.req.param('id')}:`, error);
+      return c.json({ error: 'No se pudo eliminar el tablero' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -198,4 +319,5 @@ boardRoutes.use('*', authMiddleware);
 boardRoutes.get('/boards', BoardController.getAll);
 boardRoutes.get('/boards/:id', BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);
+boardRoutes.delete('/boards/:id', BoardController.delete);
 boardRoutes.get('/boards/:id/lists', BoardController.getListsOfBoard);

@@ -1,5 +1,15 @@
 // En: src/types/kanban.types.ts
 
+// Refleja la tabla 'labels' de la BBDD
+export interface Label {
+    id: number;
+    board_id: number;
+    name: string;
+    color: string; // Hex color like '#FF5733'
+    created_at: Date;
+    updated_at: Date;
+}
+
 // Refleja la tabla 'cards' de la BBDD
 export interface Card {
     id: string; // UUID
@@ -10,6 +20,7 @@ export interface Card {
     list_id: number;
     created_at: Date;
     updated_at: Date;
+    labels?: Label[]; // Etiquetas asociadas a la tarjeta
 }
 
 // Refleja la tabla 'lists' de la BBDD, pero le añadimos un array para contener sus tarjetas
@@ -90,3 +101,34 @@ export interface CardAttachmentResponse {
   tamano_bytes: number;
   fecha_subida: Date;
 }
+
+// Interfaces para el manejo de etiquetas
+export interface CreateLabelPayload {
+  board_id: number;
+  name: string;
+  color: string;
+}
+
+export interface UpdateLabelPayload {
+  name?: string;
+  color?: string;
+}
+
+export interface CardLabelPayload {
+  card_id: string;
+  label_id: number;
+}
+
+// Colores predefinidos para etiquetas (estilo Trello)
+export const LABEL_COLORS = [
+  { name: 'Rojo', value: '#EB5A46' },
+  { name: 'Amarillo', value: '#F2D600' },
+  { name: 'Verde', value: '#61BD4F' },
+  { name: 'Naranja', value: '#FF9F1A' },
+  { name: 'Azul', value: '#0079BF' },
+  { name: 'Púrpura', value: '#C377E0' },
+  { name: 'Rosa', value: '#FF78CB' },
+  { name: 'Gris', value: '#B3BAC5' },
+  { name: 'Verde Lima', value: '#51E898' },
+  { name: 'Cielo', value: '#00C2E0' }
+] as const;
