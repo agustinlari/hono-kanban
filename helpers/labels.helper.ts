@@ -120,35 +120,47 @@ class LabelService {
    * Asigna una etiqueta a una tarjeta
    */
   static async assignLabelToCard(cardId: string, labelId: number): Promise<void> {
+    console.log(`🔗 [LabelService.assignLabelToCard] Iniciando asignación - cardId: ${cardId}, labelId: ${labelId}`);
+    
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      console.log('📝 [LabelService.assignLabelToCard] Transacción iniciada');
 
       // Verificar que la tarjeta existe
+      console.log(`🃏 [LabelService.assignLabelToCard] Verificando tarjeta ${cardId}...`);
       const cardCheck = await client.query('SELECT id FROM cards WHERE id = $1', [cardId]);
+      console.log(`🎯 [LabelService.assignLabelToCard] Tarjetas encontradas: ${cardCheck.rowCount}`);
+      
       if (cardCheck.rowCount === 0) {
         throw new Error('La tarjeta especificada no existe.');
       }
 
       // Verificar que la etiqueta existe
+      console.log(`🏷️ [LabelService.assignLabelToCard] Verificando etiqueta ${labelId}...`);
       const labelCheck = await client.query('SELECT id FROM labels WHERE id = $1', [labelId]);
+      console.log(`🎯 [LabelService.assignLabelToCard] Etiquetas encontradas: ${labelCheck.rowCount}`);
+      
       if (labelCheck.rowCount === 0) {
         throw new Error('La etiqueta especificada no existe.');
       }
 
       // Asignar etiqueta (INSERT IGNORE equivalente con ON CONFLICT)
+      console.log('💾 [LabelService.assignLabelToCard] Insertando relación...');
       const query = `
         INSERT INTO card_labels (card_id, label_id) 
         VALUES ($1, $2)
         ON CONFLICT (card_id, label_id) DO NOTHING
       `;
       await client.query(query, [cardId, labelId]);
+      console.log('✅ [LabelService.assignLabelToCard] Relación insertada');
       
       await client.query('COMMIT');
+      console.log('🎉 [LabelService.assignLabelToCard] Transacción completada exitosamente');
 
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('Error en LabelService.assignLabelToCard:', error);
+      console.error('💥 [LabelService.assignLabelToCard] Error:', error);
       throw error;
     } finally {
       client.release();
@@ -309,17 +321,33 @@ class LabelController {
    */
   static async assignToCard(c: Context) {
     try {
+      console.log('🏷️ [LabelController.assignToCard] REQUEST recibido');
+      
       const data: CardLabelPayload = await c.req.json();
+      console.log('📦 [LabelController.assignToCard] Datos recibidos:', data);
+      console.log('🔍 [LabelController.assignToCard] Tipos:', {
+        card_id: typeof data.card_id,
+        label_id: typeof data.label_id,
+        card_id_value: data.card_id,
+        label_id_value: data.label_id
+      });
 
       if (!data.card_id || !data.label_id) {
+        console.error('❌ [LabelController.assignToCard] Faltan datos requeridos:', {
+          card_id: data.card_id,
+          label_id: data.label_id
+        });
         return c.json({ error: 'card_id y label_id son requeridos' }, 400);
       }
 
+      console.log('✨ [LabelController.assignToCard] Llamando a LabelService...');
       await LabelService.assignLabelToCard(data.card_id, data.label_id);
+      console.log('✅ [LabelController.assignToCard] Etiqueta asignada exitosamente');
+      
       return c.json({ mensaje: 'Etiqueta asignada exitosamente' });
 
     } catch (error: any) {
-      console.error('Error en LabelController.assignToCard:', error);
+      console.error('💥 [LabelController.assignToCard] Error:', error);
       if (error.message.includes('no existe')) {
         return c.json({ error: error.message }, 404);
       }

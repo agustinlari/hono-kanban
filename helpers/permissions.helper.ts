@@ -16,6 +16,8 @@ class BoardPermissionService {
    * Obtiene todos los miembros de un tablero
    */
   static async getBoardMembers(boardId: number): Promise<BoardMember[]> {
+    console.log(`🔍 [BoardPermissionService.getBoardMembers] Buscando miembros para tablero ID: ${boardId}`);
+    
     const query = `
       SELECT 
         bm.*,
@@ -28,6 +30,7 @@ class BoardPermissionService {
       ORDER BY is_owner DESC, bm.joined_at ASC
     `;
     const result = await pool.query(query, [boardId]);
+    console.log(`📊 [BoardPermissionService.getBoardMembers] Encontrados ${result.rows.length} miembros para tablero ${boardId}:`, result.rows.map((r: any) => ({ board_id: r.board_id, user_email: r.user_email })));
     return result.rows;
   }
 
@@ -246,12 +249,17 @@ class PermissionController {
    */
   static async getBoardMembers(c: Context) {
     try {
-      const boardId = parseInt(c.req.param('boardId'));
+      const boardIdParam = c.req.param('boardId');
+      const boardId = parseInt(boardIdParam);
+      console.log(`🚀 [PermissionController.getBoardMembers] REQUEST para boardId: ${boardIdParam} (parsed: ${boardId})`);
+      
       if (isNaN(boardId)) {
+        console.error(`❌ [PermissionController.getBoardMembers] ID de tablero inválido: ${boardIdParam}`);
         return c.json({ error: 'ID de tablero inválido' }, 400);
       }
 
       const members = await BoardPermissionService.getBoardMembers(boardId);
+      console.log(`✅ [PermissionController.getBoardMembers] Devolviendo ${members.length} miembros para tablero ${boardId}`);
       return c.json(members);
 
     } catch (error: any) {

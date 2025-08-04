@@ -158,6 +158,12 @@ export function requirePermission(action: PermissionAction) {
           boardId = await PermissionService.getBoardIdFromCard(body.cardId);
         }
         
+        // Para /cards/labels - usar card_id
+        if (!boardId && body.card_id) {
+          console.log(`🔍 card_id desde body: ${body.card_id}`);
+          boardId = await PermissionService.getBoardIdFromCard(body.card_id);
+        }
+        
         // Para /cards (crear tarjeta) - usar list_id
         if (!boardId && body.list_id) {
           console.log(`🔍 list_id desde body: ${body.list_id}`);
