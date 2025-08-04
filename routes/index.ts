@@ -13,6 +13,7 @@ import { boardRoutes } from '../helpers/boards.helper';
 import { listRoutes } from '../helpers/lists.helper';
 import { cardRoutes } from '../helpers/cards.helper';
 import { labelRoutes } from '../helpers/labels.helper';
+import { permissionRoutes } from '../helpers/permissions.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -47,3 +48,4 @@ routes.route('/', boardRoutes);
 routes.route('/', listRoutes);
 routes.route('/', cardRoutes);
 routes.route('/', labelRoutes);
+routes.route('/', permissionRoutes);

@@ -4,7 +4,9 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database';
 import { authMiddleware } from '../middleware/auth';
+import { requirePermission, requireBoardAccess } from '../middleware/permissions';
 import type { Variables } from '../types';
+import { PermissionAction } from '../types';
 import type { 
   Label, 
   CreateLabelPayload, 
@@ -379,12 +381,12 @@ export const labelRoutes = new Hono<{ Variables: Variables }>();
 labelRoutes.use('*', authMiddleware);
 
 // Rutas de etiquetas por tablero
-labelRoutes.get('/boards/:boardId/labels', LabelController.getByBoardId);
-labelRoutes.post('/labels', LabelController.create);
-labelRoutes.put('/labels/:id', LabelController.update);
-labelRoutes.delete('/labels/:id', LabelController.delete);
+labelRoutes.get('/boards/:boardId/labels', requireBoardAccess(), LabelController.getByBoardId);
+labelRoutes.post('/labels', requirePermission(PermissionAction.MANAGE_LABELS), LabelController.create);
+labelRoutes.put('/labels/:id', requirePermission(PermissionAction.MANAGE_LABELS), LabelController.update);
+labelRoutes.delete('/labels/:id', requirePermission(PermissionAction.MANAGE_LABELS), LabelController.delete);
 
-// Rutas de asignación de etiquetas a tarjetas
-labelRoutes.post('/cards/labels', LabelController.assignToCard);
-labelRoutes.delete('/cards/:cardId/labels/:labelId', LabelController.unassignFromCard);
-labelRoutes.get('/cards/:cardId/labels', LabelController.getCardLabels);
+// Rutas de asignación de etiquetas a tarjetas (requiere editar tarjetas)
+labelRoutes.post('/cards/labels', requirePermission(PermissionAction.EDIT_CARDS), LabelController.assignToCard);
+labelRoutes.delete('/cards/:cardId/labels/:labelId', requirePermission(PermissionAction.EDIT_CARDS), LabelController.unassignFromCard);
+labelRoutes.get('/cards/:cardId/labels', requireBoardAccess(), LabelController.getCardLabels);

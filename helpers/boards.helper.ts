@@ -6,6 +6,7 @@ import { pool } from '../config/database';
 import { authMiddleware } from '../middleware/auth';
 import type { Variables } from '../types';
 import type { Board, List, Card, CreateBoardPayload } from '../types/kanban.types';
+import { requireBoardAccess, requireOwnership } from '../middleware/permissions';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -140,16 +141,13 @@ class BoardService {
   /**
    * Crea un nuevo tablero
    */
-  static async createBoard(data: CreateBoardPayload): Promise<Board> {
+  static async createBoard(data: CreateBoardPayload, ownerId: number): Promise<Board> {
       const { name, description = null } = data;
-      // Las nuevas listas se insertan al final, así que su posición es el número actual de tableros.
-      const positionResult = await pool.query('SELECT COUNT(*) as count FROM boards');
-      const newPosition = parseInt(positionResult.rows[0].count);
 
       const query = `
-        INSERT INTO boards (name, description) 
-        VALUES ($1, $2) RETURNING *`;
-      const result = await pool.query(query, [name, description]);
+        INSERT INTO boards (name, description, owner_id) 
+        VALUES ($1, $2, $3) RETURNING *`;
+      const result = await pool.query(query, [name, description, ownerId]);
       return result.rows[0];
   }
 
@@ -271,11 +269,12 @@ class BoardController {
     
   static async create(c: Context) {
     try {
+      const user = c.get('user');
       const data: CreateBoardPayload = await c.req.json();
       if (!data.name || typeof data.name !== 'string') {
         return c.json({ error: 'El nombre del tablero es requerido' }, 400);
       }
-      const newBoard = await BoardService.createBoard(data);
+      const newBoard = await BoardService.createBoard(data, user.userId);
       return c.json(newBoard, 201);
     } catch (error: any) {
         console.error('Error en BoardController.create:', error);
@@ -316,8 +315,8 @@ export const boardRoutes = new Hono<{ Variables: Variables }>();
 
 // Todas las rutas de tableros requerirán autenticación
 boardRoutes.use('*', authMiddleware);
-boardRoutes.get('/boards', BoardController.getAll);
-boardRoutes.get('/boards/:id', BoardController.getOne);
+// Nota: /boards (getAll) ahora se maneja desde permissionRoutes.getUserBoards()
+boardRoutes.get('/boards/:id', requireBoardAccess(), BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);
-boardRoutes.delete('/boards/:id', BoardController.delete);
-boardRoutes.get('/boards/:id/lists', BoardController.getListsOfBoard);
+boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
+boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);

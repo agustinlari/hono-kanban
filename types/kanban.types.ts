@@ -39,6 +39,7 @@ export interface Board {
     id: number;
     name: string;
     description: string | null;
+    owner_id: number | null;
     created_at: Date;
     updated_at: Date;
     lists: List[]; // Las listas se anidarán aquí

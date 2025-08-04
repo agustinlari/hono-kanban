@@ -4,7 +4,9 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database'; 
 import { authMiddleware } from '../middleware/auth';
+import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
+import { PermissionAction } from '../types';
 import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload } from '../types/kanban.types';
 
 // ================================
@@ -275,22 +277,62 @@ class CardController {
     try {
       const data: MoveCardPayload = await c.req.json();
       
+      // DEBUG: Agregar logging para ver qué datos se están recibiendo
+      console.log('=== BACKEND CARD MOVE DEBUG ===');
+      console.log('Datos recibidos:', JSON.stringify(data, null, 2));
+      console.log('Tipos de datos:');
+      console.log('- cardId:', typeof data.cardId, 'valor:', data.cardId);
+      console.log('- sourceListId:', typeof data.sourceListId, 'valor:', data.sourceListId);
+      console.log('- targetListId:', typeof data.targetListId, 'valor:', data.targetListId);
+      console.log('- newIndex:', typeof data.newIndex, 'valor:', data.newIndex);
+      console.log('===============================');
+      
+      // Validación y conversión de tipos si es necesario
+      const cardId = String(data.cardId);
+      const sourceListId = typeof data.sourceListId === 'string' ? parseInt(data.sourceListId) : data.sourceListId;
+      const targetListId = typeof data.targetListId === 'string' ? parseInt(data.targetListId) : data.targetListId;
+      const newIndex = typeof data.newIndex === 'string' ? parseInt(data.newIndex) : data.newIndex;
+      
       // Validación básica
-      if (!data.cardId || !data.sourceListId || !data.targetListId || data.newIndex === undefined) {
-          return c.json({ error: 'Faltan parámetros requeridos (cardId, sourceListId, targetListId, newIndex).' }, 400);
+      if (!cardId || isNaN(sourceListId) || isNaN(targetListId) || isNaN(newIndex)) {
+        console.log('❌ Error de validación:');
+        console.log('- cardId válido:', !!cardId);
+        console.log('- sourceListId válido:', !isNaN(sourceListId));
+        console.log('- targetListId válido:', !isNaN(targetListId));
+        console.log('- newIndex válido:', !isNaN(newIndex));
+        return c.json({ 
+          error: 'Parámetros inválidos',
+          details: {
+            cardId: !!cardId,
+            sourceListId: !isNaN(sourceListId),
+            targetListId: !isNaN(targetListId),
+            newIndex: !isNaN(newIndex)
+          }
+        }, 400);
       }
       
-      await CardService.moveCard(data);
+      const moveData = {
+        cardId,
+        sourceListId,
+        targetListId,
+        newIndex
+      };
+      
+      console.log('✅ Datos procesados para CardService.moveCard:', moveData);
+      
+      await CardService.moveCard(moveData);
+      
+      console.log('✅ Tarjeta movida exitosamente');
       
       // La operación fue exitosa, no es necesario devolver contenido.
       return c.body(null, 204);
 
     } catch (error: any) {
-      console.error('Error en CardController.move:', error);
+      console.error('❌ Error en CardController.move:', error);
       if (error.message.includes('no existe')) {
         return c.json({ error: error.message }, 404);
       }
-      return c.json({ error: 'No se pudo mover la tarjeta' }, 500);
+      return c.json({ error: 'No se pudo mover la tarjeta', details: error.message }, 500);
     }
   }
 }
@@ -303,7 +345,7 @@ export const cardRoutes = new Hono<{ Variables: Variables }>();
 cardRoutes.use('*', authMiddleware);
 
 // Endpoint para crear una nueva tarjeta
-cardRoutes.post('/cards', CardController.create);
-cardRoutes.put('/cards/:id', CardController.update);
-cardRoutes.delete('/cards/:id', CardController.delete);
-cardRoutes.patch('/cards/move', CardController.move);
+cardRoutes.post('/cards', requirePermission(PermissionAction.CREATE_CARDS), CardController.create);
+cardRoutes.put('/cards/:id', requirePermission(PermissionAction.EDIT_CARDS), CardController.update);
+cardRoutes.delete('/cards/:id', requirePermission(PermissionAction.DELETE_CARDS), CardController.delete);
+cardRoutes.patch('/cards/move', requirePermission(PermissionAction.MOVE_CARDS), CardController.move);
