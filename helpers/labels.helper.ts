@@ -84,7 +84,7 @@ class LabelService {
     }
 
     const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
-    const queryValues = fieldsToUpdate.map(key => data[key]);
+    const queryValues: any[] = fieldsToUpdate.map(key => data[key]);
     queryValues.push(id);
 
     const query = `
