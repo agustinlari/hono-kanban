@@ -34,24 +34,74 @@ routes.get('/', (c) => {
   return c.text('¡Hola Mundo con Hono!');
 });
 
-// --- Middleware para servir imágenes ---
-// Esta es la única línea necesaria para serveStatic.
-// Mapea la URL /public/{nombre_de_la_carpeta} a la ubicación física exacta.
-routes.use(`/public/${uploadsFolderName}/*`, async (c, next) => {
-  // Añadir headers CORS explícitos para imágenes estáticas
+// --- Servir imágenes con CORS personalizado ---
+// En lugar de usar serveStatic que puede tener problemas con CORS,
+// creamos un handler personalizado que sirve los archivos con CORS correcto
+routes.get(`/public/${uploadsFolderName}/*`, async (c) => {
+  try {
+    // Extraer el nombre del archivo de la URL
+    const url = new URL(c.req.url);
+    const pathname = url.pathname;
+    const filename = pathname.split('/').pop(); // Obtener solo el nombre del archivo
+    
+    if (!filename) {
+      return c.json({ error: 'Archivo no especificado' }, 400);
+    }
+    
+    // Construir la ruta completa del archivo
+    const filePath = path.join(UPLOADS_DIR, filename);
+    
+    // Verificar que el archivo existe
+    const fs = await import('fs/promises');
+    try {
+      await fs.access(filePath);
+    } catch {
+      return c.json({ error: 'Archivo no encontrado' }, 404);
+    }
+    
+    // Leer el archivo
+    const fileBuffer = await fs.readFile(filePath);
+    
+    // Determinar el tipo MIME basado en la extensión
+    const ext = path.extname(filename).toLowerCase();
+    let mimeType = 'application/octet-stream';
+    
+    const mimeTypes: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml'
+    };
+    
+    if (mimeTypes[ext]) {
+      mimeType = mimeTypes[ext];
+    }
+    
+    // Establecer headers CORS y de contenido
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Pragma');
+    c.header('Content-Type', mimeType);
+    c.header('Cache-Control', 'public, max-age=31536000'); // Cache por 1 año
+    
+    return c.body(fileBuffer);
+    
+  } catch (error) {
+    console.error('Error sirviendo archivo estático:', error);
+    return c.json({ error: 'Error interno del servidor' }, 500);
+  }
+});
+
+// Manejar peticiones OPTIONS para CORS preflight
+routes.options(`/public/${uploadsFolderName}/*`, (c) => {
   c.header('Access-Control-Allow-Origin', '*');
   c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Si es una petición OPTIONS (preflight), responder inmediatamente
-  if (c.req.method === 'OPTIONS') {
-    return c.text('', 200);
-  }
-  
-  await next();
-}, serveStatic({
-  root: path.dirname(UPLOADS_DIR),
-}));
+  c.header('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Pragma');
+  c.header('Access-Control-Max-Age', '86400');
+  return c.text('', 200);
+});
 
 // --- Montar todas las rutas modulares de la API ---
 routes.route('/', authRoutes);
