@@ -139,7 +139,9 @@ class ArchivoService {
 
         // Si es un thumbnail, actualizar el image_url de la tarjeta
         if (isThumbnail) {
-          const imageUrl = `/archivos/${nuevoArchivo.id}/descargar`;
+          // Usar la ruta estática pública para que todos los usuarios puedan ver la imagen
+          const uploadsFolderName = path.basename(UPLOADS_DIR);
+          const imageUrl = `/public/${uploadsFolderName}/${nuevoArchivo.nombre_guardado}`;
           console.log(`Actualizando image_url de tarjeta ${cardId} con URL: ${imageUrl}`);
           
           const updateResult = await client.query(
@@ -453,9 +455,6 @@ class ArchivoController {
   }
 
   static async descargarArchivo(c: Context) {
-    const user = c.get('user');
-    if (!user) return c.json({ error: 'No autorizado' }, 401);
-
     const id = parseInt(c.req.param('id'));
     if (isNaN(id)) return c.json({ error: 'ID de archivo inválido' }, 400);
 
@@ -471,12 +470,14 @@ class ArchivoController {
 
       let metadata;
       if (isCardAttachment) {
-        // Si está asociado a una tarjeta, permitir acceso sin verificar usuario
+        // Si está asociado a una tarjeta, permitir acceso público (sin autenticación)
         const metadataQuery = 'SELECT * FROM archivos WHERE id = $1';
         const result = await pool.query(metadataQuery, [id]);
         metadata = result.rows[0] || null;
       } else {
-        // Si no está asociado a tarjetas, verificar que pertenezca al usuario
+        // Si no está asociado a tarjetas, requerir autenticación
+        const user = c.get('user');
+        if (!user) return c.json({ error: 'No autorizado' }, 401);
         metadata = await ArchivoService.obtenerMetadataArchivo(id, user.userId);
       }
 
@@ -535,7 +536,7 @@ class ArchivoController {
 export const archivoRoutes = new Hono<{ Variables: Variables }>();
 
 archivoRoutes.post('/archivos/subir', authMiddleware, ArchivoController.subirArchivo);
-archivoRoutes.get('/archivos/:id/descargar', authMiddleware, ArchivoController.descargarArchivo);
+archivoRoutes.get('/archivos/:id/descargar', ArchivoController.descargarArchivo); // Sin authMiddleware para permitir acceso público a imágenes de tarjetas
 archivoRoutes.delete('/archivos/:id', authMiddleware, ArchivoController.borrarArchivo);
 
 // Rutas específicas para tarjetas
