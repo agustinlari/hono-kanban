@@ -198,7 +198,7 @@ export function requirePermission(action: PermissionAction) {
     }
 
     if (!boardId) {
-      const labelId = parseInt(c.req.param('labelId') || '');
+      const labelId = parseInt(c.req.param('labelId') || c.req.param('id') || '');
       if (!isNaN(labelId)) {
         boardId = await PermissionService.getBoardIdFromLabel(labelId);
       }
