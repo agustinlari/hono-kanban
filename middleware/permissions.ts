@@ -78,11 +78,24 @@ export class PermissionService {
    * Obtiene el board_id desde diferentes fuentes (parámetros, body, etc.)
    */
   static getBoardIdFromContext(c: Context): number | null {
+    console.log(`🔍 [getBoardIdFromContext] Iniciando búsqueda de board_id`);
+    
     // Intentar obtener de parámetros de la URL
     const boardIdParam = c.req.param('boardId') || c.req.param('id');
+    console.log(`🔍 [getBoardIdFromContext] Parámetros URL: boardId='${c.req.param('boardId')}', id='${c.req.param('id')}'`);
     if (boardIdParam) {
       const boardId = parseInt(boardIdParam);
-      if (!isNaN(boardId)) return boardId;
+      console.log(`🔍 [getBoardIdFromContext] Board_id desde parámetros: ${boardId}`);
+      if (!isNaN(boardId)) {
+        // IMPORTANTE: Para rutas de labels como /labels/:id, NO queremos usar el id como board_id
+        const path = c.req.path;
+        console.log(`🔍 [getBoardIdFromContext] Path actual: ${path}`);
+        if (path.includes('/labels/') && !path.includes('/boards/')) {
+          console.log(`🚨 [getBoardIdFromContext] Detectada ruta de label, NO usando parámetro id como board_id`);
+          return null;
+        }
+        return boardId;
+      }
     }
 
     // Intentar obtener del cuerpo de la petición
@@ -90,12 +103,15 @@ export class PermissionService {
       const body = c.req.json();
       if (body && typeof body === 'object' && 'board_id' in body) {
         const boardId = parseInt(body.board_id as string);
+        console.log(`🔍 [getBoardIdFromContext] Board_id desde body: ${boardId}`);
         if (!isNaN(boardId)) return boardId;
       }
     } catch {
       // Ignorar errores de parsing JSON
+      console.log(`🔍 [getBoardIdFromContext] No se pudo parsear JSON del body`);
     }
 
+    console.log(`🔍 [getBoardIdFromContext] No se encontró board_id en contexto`);
     return null;
   }
 
@@ -164,6 +180,14 @@ export function requirePermission(action: PermissionAction) {
     boardId = PermissionService.getBoardIdFromContext(c);
     console.log(`🔍 Board_id desde contexto: ${boardId}`);
     
+    // Si se obtiene board_id desde contexto pero estamos actualizando labels, debuggear
+    if (boardId && action === PermissionAction.MANAGE_LABELS) {
+      console.log(`🚨 [DEBUG] Board_id obtenido desde contexto para MANAGE_LABELS: ${boardId}`);
+      console.log(`🚨 [DEBUG] URL path: ${c.req.path}`);
+      console.log(`🚨 [DEBUG] Method: ${c.req.method}`);
+      console.log(`🚨 [DEBUG] Todos los params:`, c.req.param());
+    }
+    
     // Si no se encuentra en contexto directo, buscar por entidades relacionadas
     if (!boardId) {
       console.log('🔍 No se encontró board_id en contexto, buscando por entidades relacionadas...');
@@ -219,9 +243,13 @@ export function requirePermission(action: PermissionAction) {
     }
 
     if (!boardId) {
-      const labelId = parseInt(c.req.param('labelId') || c.req.param('id') || '');
+      const labelIdParam = c.req.param('labelId') || c.req.param('id') || '';
+      console.log(`🔍 [requirePermission] Parametro labelId encontrado: '${labelIdParam}'`);
+      const labelId = parseInt(labelIdParam);
+      console.log(`🔍 [requirePermission] LabelId parseado: ${labelId}, isNaN: ${isNaN(labelId)}`);
       if (!isNaN(labelId)) {
         boardId = await PermissionService.getBoardIdFromLabel(labelId);
+        console.log(`🔍 [requirePermission] BoardId obtenido desde label ${labelId}: ${boardId}`);
       }
     }
 
