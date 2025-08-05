@@ -72,16 +72,20 @@ class LabelService {
    * Actualiza una etiqueta existente
    */
   static async updateLabel(id: number, data: UpdateLabelPayload): Promise<Label | null> {
+    console.log(`🏷️ [LabelService.updateLabel] Iniciando actualización de etiqueta ${id}`, data);
+    
     const fieldsToUpdate = Object.keys(data) as Array<keyof UpdateLabelPayload>;
+    console.log(`🔍 [LabelService.updateLabel] Campos a actualizar:`, fieldsToUpdate);
     
     if (fieldsToUpdate.length === 0) {
+      console.log(`⚠️ [LabelService.updateLabel] No hay campos para actualizar`);
       const currentLabel = await pool.query('SELECT * FROM labels WHERE id = $1', [id]);
       return currentLabel.rows[0] || null;
     }
 
     const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
     const queryValues = fieldsToUpdate.map(key => data[key]);
-    queryValues.push(id.toString());
+    queryValues.push(id);
 
     const query = `
       UPDATE labels 
@@ -90,7 +94,11 @@ class LabelService {
       RETURNING *
     `;
     
+    console.log(`📝 [LabelService.updateLabel] Query SQL:`, query);
+    console.log(`📝 [LabelService.updateLabel] Valores:`, queryValues);
+    
     const result = await pool.query(query, queryValues);
+    console.log(`✅ [LabelService.updateLabel] Resultado:`, result.rows[0]);
     return result.rows[0] || null;
   }
 
@@ -259,32 +267,41 @@ class LabelController {
    */
   static async update(c: Context) {
     try {
+      console.log(`🎯 [LabelController.update] REQUEST recibido para ID: ${c.req.param('id')}`);
+      
       const id = parseInt(c.req.param('id'));
       if (isNaN(id)) {
+        console.log(`❌ [LabelController.update] ID inválido: ${c.req.param('id')}`);
         return c.json({ error: 'ID de etiqueta inválido' }, 400);
       }
 
       const data: UpdateLabelPayload = await c.req.json();
+      console.log(`📦 [LabelController.update] Datos recibidos:`, data);
 
       if (Object.keys(data).length === 0) {
+        console.log(`❌ [LabelController.update] Cuerpo vacío`);
         return c.json({ error: 'El cuerpo de la petición no puede estar vacío' }, 400);
       }
 
       // Validar color si se proporciona
       if (data.color && !/^#[0-9A-F]{6}$/i.test(data.color)) {
+        console.log(`❌ [LabelController.update] Color inválido: ${data.color}`);
         return c.json({ error: 'color debe ser un valor hexadecimal válido (ej: #FF5733)' }, 400);
       }
 
+      console.log(`🔄 [LabelController.update] Llamando a LabelService.updateLabel...`);
       const updatedLabel = await LabelService.updateLabel(id, data);
 
       if (!updatedLabel) {
+        console.log(`❌ [LabelController.update] Etiqueta no encontrada: ${id}`);
         return c.json({ error: `Etiqueta con ID ${id} no encontrada` }, 404);
       }
 
+      console.log(`✅ [LabelController.update] Etiqueta actualizada exitosamente:`, updatedLabel);
       return c.json(updatedLabel);
 
     } catch (error: any) {
-      console.error(`Error en LabelController.update para id ${c.req.param('id')}:`, error);
+      console.error(`💥 [LabelController.update] Error para id ${c.req.param('id')}:`, error);
       if (error.code === '23505') {
         return c.json({ error: 'Ya existe una etiqueta con ese nombre en este tablero' }, 409);
       }
