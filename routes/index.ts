@@ -37,7 +37,19 @@ routes.get('/', (c) => {
 // --- Middleware para servir imágenes ---
 // Esta es la única línea necesaria para serveStatic.
 // Mapea la URL /public/{nombre_de_la_carpeta} a la ubicación física exacta.
-routes.use(`/public/${uploadsFolderName}/*`, serveStatic({
+routes.use(`/public/${uploadsFolderName}/*`, async (c, next) => {
+  // Añadir headers CORS explícitos para imágenes estáticas
+  c.header('Access-Control-Allow-Origin', '*');
+  c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  c.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Si es una petición OPTIONS (preflight), responder inmediatamente
+  if (c.req.method === 'OPTIONS') {
+    return c.text('', 200);
+  }
+  
+  await next();
+}, serveStatic({
   root: path.dirname(UPLOADS_DIR),
 }));
 
