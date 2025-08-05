@@ -161,8 +161,13 @@ class BoardPermissionService {
   static async updateMemberPermissions(data: UpdateMemberPermissionsPayload): Promise<BoardMember | null> {
     const { board_id, user_id, permissions } = data;
 
+    console.log('🔧 Actualizando permisos de miembro:', { board_id, user_id, permissions });
+
     const fieldsToUpdate = Object.keys(permissions);
+    console.log('🔧 Campos a actualizar:', fieldsToUpdate);
+    
     if (fieldsToUpdate.length === 0) {
+      console.log('🔧 No hay campos para actualizar, devolviendo miembro actual');
       const current = await pool.query(
         'SELECT * FROM board_members WHERE board_id = $1 AND user_id = $2',
         [board_id, user_id]
@@ -180,8 +185,17 @@ class BoardPermissionService {
       RETURNING *
     `;
     
-    const result = await pool.query(query, queryValues);
-    return result.rows[0] || null;
+    console.log('🔧 Query SQL:', query);
+    console.log('🔧 Query values:', queryValues);
+    
+    try {
+      const result = await pool.query(query, queryValues);
+      console.log('🔧 Resultado query:', result.rows[0]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('💥 Error en query SQL:', error);
+      throw error;
+    }
   }
 
   /**
@@ -318,21 +332,30 @@ class PermissionController {
   static async updateMemberPermissions(c: Context) {
     try {
       const data: UpdateMemberPermissionsPayload = await c.req.json();
+      console.log('🎯 Datos recibidos en updateMemberPermissions:', JSON.stringify(data, null, 2));
 
       if (!data.board_id || !data.user_id || !data.permissions) {
+        console.log('💥 Faltan campos requeridos:', { 
+          board_id: !!data.board_id, 
+          user_id: !!data.user_id, 
+          permissions: !!data.permissions 
+        });
         return c.json({ error: 'board_id, user_id y permissions son requeridos' }, 400);
       }
 
       const updatedMember = await BoardPermissionService.updateMemberPermissions(data);
 
       if (!updatedMember) {
+        console.log('💥 Miembro no encontrado después de actualización');
         return c.json({ error: 'Miembro no encontrado' }, 404);
       }
 
+      console.log('✅ Permisos actualizados exitosamente:', updatedMember);
       return c.json({ mensaje: 'Permisos actualizados exitosamente', member: updatedMember });
 
     } catch (error: any) {
-      console.error('Error en PermissionController.updateMemberPermissions:', error);
+      console.error('💥 Error en PermissionController.updateMemberPermissions:', error);
+      console.error('💥 Stack trace:', error.stack);
       return c.json({ error: 'No se pudieron actualizar los permisos' }, 500);
     }
   }
@@ -518,7 +541,7 @@ permissionRoutes.use('*', authMiddleware);
 // Rutas de miembros del tablero
 permissionRoutes.get('/boards/:boardId/members', requireBoardAccess(), PermissionController.getBoardMembers);
 permissionRoutes.post('/boards/members', requirePermission(PermissionAction.ADD_MEMBERS), PermissionController.addMember);
-permissionRoutes.put('/boards/members/permissions', requirePermission(PermissionAction.ADD_MEMBERS), PermissionController.updateMemberPermissions);
+permissionRoutes.put('/boards/members/permissions', requirePermission(PermissionAction.EDIT_BOARD), PermissionController.updateMemberPermissions);
 permissionRoutes.delete('/boards/:boardId/members/:userId', requirePermission(PermissionAction.REMOVE_MEMBERS), PermissionController.removeMember);
 
 // Rutas de información
