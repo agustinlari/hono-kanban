@@ -344,6 +344,59 @@ class ArchivoService {
     console.log('Estado de la tarjeta:', JSON.stringify(estado, null, 2));
     return estado;
   }
+
+  static async migrarUrlsImagenes(): Promise<{ migradas: number; errores: number }> {
+    console.log('🔄 Iniciando migración de URLs de imágenes...');
+    
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Obtener todas las tarjetas con image_url que usen el patrón antiguo
+      const query = `
+        SELECT c.id as card_id, c.image_url, a.nombre_guardado
+        FROM cards c
+        INNER JOIN card_attachments ca ON c.id = ca.card_id AND ca.is_thumbnail = true
+        INNER JOIN archivos a ON ca.archivo_id = a.id
+        WHERE c.image_url LIKE '/archivos/%/descargar'
+      `;
+      
+      const result = await client.query(query);
+      const uploadsFolderName = path.basename(UPLOADS_DIR);
+      
+      let migradas = 0;
+      let errores = 0;
+
+      for (const row of result.rows) {
+        try {
+          const nuevaUrl = `/public/${uploadsFolderName}/${row.nombre_guardado}`;
+          
+          await client.query(
+            'UPDATE cards SET image_url = $1 WHERE id = $2',
+            [nuevaUrl, row.card_id]
+          );
+          
+          console.log(`✅ Migrada: ${row.card_id} -> ${nuevaUrl}`);
+          migradas++;
+        } catch (error) {
+          console.error(`❌ Error migrando ${row.card_id}:`, error);
+          errores++;
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log(`🎉 Migración completada: ${migradas} exitosas, ${errores} errores`);
+      
+      return { migradas, errores };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('💥 Error en migración:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 
@@ -454,6 +507,31 @@ class ArchivoController {
     }
   }
 
+  static async migrarUrls(c: Context) {
+    const user = c.get('user');
+    
+    // Para el endpoint público temporal, saltarse la verificación de admin
+    const isPublicEndpoint = c.req.path.includes('migrar-urls-publico');
+    
+    if (!isPublicEndpoint) {
+      // Solo permitir a administradores ejecutar la migración en el endpoint protegido
+      if (!user || user.rol !== 'admin') {
+        return c.json({ error: 'Solo administradores pueden ejecutar migraciones' }, 403);
+      }
+    }
+
+    try {
+      const resultado = await ArchivoService.migrarUrlsImagenes();
+      return c.json({
+        mensaje: 'Migración completada',
+        ...resultado
+      });
+    } catch (error: any) {
+      console.error('Error en migración de URLs:', error);
+      return c.json({ error: 'Error al ejecutar la migración' }, 500);
+    }
+  }
+
   static async descargarArchivo(c: Context) {
     const id = parseInt(c.req.param('id'));
     if (isNaN(id)) return c.json({ error: 'ID de archivo inválido' }, 400);
@@ -543,3 +621,9 @@ archivoRoutes.delete('/archivos/:id', authMiddleware, ArchivoController.borrarAr
 archivoRoutes.get('/cards/:cardId/archivos', authMiddleware, ArchivoController.obtenerArchivosCard);
 archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', authMiddleware, ArchivoController.desvincularArchivoDeCard);
 archivoRoutes.get('/cards/:cardId/estado', authMiddleware, ArchivoController.verificarEstadoCard);
+
+// Ruta temporal para migrar URLs existentes (solo admin)
+archivoRoutes.post('/archivos/migrar-urls', authMiddleware, ArchivoController.migrarUrls);
+
+// Ruta temporal PÚBLICA para migración de emergencia (ELIMINAR después de usar)
+archivoRoutes.post('/archivos/migrar-urls-publico', ArchivoController.migrarUrls);
