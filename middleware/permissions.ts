@@ -84,12 +84,22 @@ export class PermissionService {
     const boardIdParam = c.req.param('boardId') || c.req.param('id');
     console.log(`🔍 [getBoardIdFromContext] Parámetros URL: boardId='${c.req.param('boardId')}', id='${c.req.param('id')}'`);
     if (boardIdParam) {
+      const path = c.req.path;
+      console.log(`🔍 [getBoardIdFromContext] Path actual: ${path}`);
+      
+      // UUID pattern: 8-4-4-4-12 caracteres hexadecimales
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      
+      // Si el parámetro es un UUID, NO lo tratemos como board_id
+      if (uuidPattern.test(boardIdParam)) {
+        console.log(`🚨 [getBoardIdFromContext] Parámetro es un UUID (${boardIdParam}), NO usando como board_id`);
+        return null;
+      }
+      
       const boardId = parseInt(boardIdParam);
       console.log(`🔍 [getBoardIdFromContext] Board_id desde parámetros: ${boardId}`);
       if (!isNaN(boardId)) {
         // IMPORTANTE: Para rutas de labels como /labels/:id, NO queremos usar el id como board_id
-        const path = c.req.path;
-        console.log(`🔍 [getBoardIdFromContext] Path actual: ${path}`);
         if (path.includes('/labels/') && !path.includes('/boards/')) {
           console.log(`🚨 [getBoardIdFromContext] Detectada ruta de label, NO usando parámetro id como board_id`);
           return null;
