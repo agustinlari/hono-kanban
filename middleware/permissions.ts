@@ -13,6 +13,7 @@ export class PermissionService {
    * Obtiene los permisos de un usuario en un tablero específico
    */
   static async getUserBoardPermissions(userId: number, boardId: number): Promise<BoardPermissions | null> {
+    console.log(`🔍 [getUserBoardPermissions] Buscando permisos: userId=${userId}, boardId=${boardId}`);
     const query = `
       SELECT 
         can_view, can_create_cards, can_edit_cards, can_move_cards,
@@ -23,7 +24,12 @@ export class PermissionService {
     `;
     
     const result = await pool.query(query, [userId, boardId]);
-    return result.rows[0] || null;
+    const permissions = result.rows[0] || null;
+    console.log(`📊 [getUserBoardPermissions] Query result:`, {
+      rowCount: result.rowCount,
+      permissions: permissions
+    });
+    return permissions;
   }
 
   /**
@@ -45,15 +51,27 @@ export class PermissionService {
     boardId: number, 
     action: PermissionAction
   ): Promise<boolean> {
+    console.log(`🔐 [hasPermission] Verificando: userId=${userId}, boardId=${boardId}, action=${action}`);
+    
     // El owner siempre tiene todos los permisos
-    if (await this.isOwner(userId, boardId)) {
+    const isOwner = await this.isOwner(userId, boardId);
+    console.log(`👑 [hasPermission] ¿Es owner? ${isOwner}`);
+    if (isOwner) {
+      console.log(`✅ [hasPermission] Owner confirmado, acceso concedido`);
       return true;
     }
 
     const permissions = await this.getUserBoardPermissions(userId, boardId);
-    if (!permissions) return false;
+    console.log(`📋 [hasPermission] Permisos obtenidos:`, permissions);
+    
+    if (!permissions) {
+      console.log(`❌ [hasPermission] No se encontraron permisos`);
+      return false;
+    }
 
-    return permissions[action] === true;
+    const hasAccess = permissions[action] === true;
+    console.log(`🎯 [hasPermission] ¿Tiene permiso ${action}? ${hasAccess}`);
+    return hasAccess;
   }
 
   /**
@@ -114,9 +132,12 @@ export class PermissionService {
    * Obtiene el board_id desde el label_id
    */
   static async getBoardIdFromLabel(labelId: number): Promise<number | null> {
+    console.log(`🏷️ [getBoardIdFromLabel] Buscando board_id para label: ${labelId}`);
     const query = 'SELECT board_id FROM labels WHERE id = $1';
     const result = await pool.query(query, [labelId]);
-    return result.rows[0]?.board_id || null;
+    const boardId = result.rows[0]?.board_id || null;
+    console.log(`🏷️ [getBoardIdFromLabel] Resultado: ${boardId}`);
+    return boardId;
   }
 }
 
