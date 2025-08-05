@@ -139,9 +139,8 @@ class ArchivoService {
 
         // Si es un thumbnail, actualizar el image_url de la tarjeta
         if (isThumbnail) {
-          // Usar la ruta estática pública para que todos los usuarios puedan ver la imagen
-          const uploadsFolderName = path.basename(UPLOADS_DIR);
-          const imageUrl = `/public/${uploadsFolderName}/${nuevoArchivo.nombre_guardado}`;
+          // Por ahora usar la URL protegida hasta que resolvamos el problema de CORS con archivos estáticos
+          const imageUrl = `/api/archivos/${nuevoArchivo.id}/descargar`;
           console.log(`Actualizando image_url de tarjeta ${cardId} con URL: ${imageUrl}`);
           
           const updateResult = await client.query(

@@ -15,6 +15,15 @@ console.log("Iniciando script index.ts...");
 const app = new Hono<{ Variables: Variables }>();
 console.log("Instancia de Hono creada.");
 
+// CORS específico para archivos estáticos (antes del CORS global)
+app.use('/public/*', cors({
+  origin: '*',
+  allowHeaders: ['Content-Type', 'Cache-Control', 'Pragma'],
+  allowMethods: ['GET', 'OPTIONS'],
+  maxAge: 86400,
+  credentials: false, // No necesitamos credenciales para archivos estáticos
+}));
+
 // Middleware de CORS Global (ajusta 'origin' y 'allowHeaders' según tus necesidades)
 app.use('*', cors({
   origin: '*', // O un array de orígenes permitidos: ['http://localhost:3001', 'https://tufrontend.com']

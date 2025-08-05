@@ -79,10 +79,7 @@ routes.get(`/public/${uploadsFolderName}/*`, async (c) => {
       mimeType = mimeTypes[ext];
     }
     
-    // Establecer headers CORS y de contenido
-    c.header('Access-Control-Allow-Origin', '*');
-    c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    c.header('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Pragma');
+    // Establecer headers de contenido (CORS ya manejado por middleware)
     c.header('Content-Type', mimeType);
     c.header('Cache-Control', 'public, max-age=31536000'); // Cache por 1 año
     
@@ -94,14 +91,12 @@ routes.get(`/public/${uploadsFolderName}/*`, async (c) => {
   }
 });
 
-// Manejar peticiones OPTIONS para CORS preflight
-routes.options(`/public/${uploadsFolderName}/*`, (c) => {
-  c.header('Access-Control-Allow-Origin', '*');
-  c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Pragma');
-  c.header('Access-Control-Max-Age', '86400');
-  return c.text('', 200);
+// Test endpoint para verificar CORS
+routes.get('/test-cors', (c) => {
+  return c.json({ message: 'CORS test successful', timestamp: new Date().toISOString() });
 });
+
+// OPTIONS ya manejado por el middleware de CORS en index.ts
 
 // --- Montar todas las rutas modulares de la API ---
 routes.route('/', authRoutes);
