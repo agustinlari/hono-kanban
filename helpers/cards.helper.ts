@@ -57,37 +57,73 @@ class CardService {
     }
   }
   static async updateCard(id: string, data: UpdateCardPayload): Promise<Card | null> {
-    const fieldsToUpdate = Object.keys(data) as Array<keyof UpdateCardPayload>;
-    
-    // Si no se proporcionan campos para actualizar, no hacemos nada.
-    if (fieldsToUpdate.length === 0) {
-      // Opcionalmente, podrías devolver la tarjeta actual o un error.
-      // Devolver la tarjeta actual puede ser útil.
-      const currentCard = await pool.query('SELECT * FROM cards WHERE id = $1', [id]);
-      return currentCard.rows[0] || null;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Separar campos de la tabla cards de las etiquetas
+      const { labels, ...cardFields } = data;
+      const fieldsToUpdate = Object.keys(cardFields) as Array<keyof Omit<UpdateCardPayload, 'labels'>>;
+      
+      let updatedCard: Card | null = null;
+
+      // Actualizar campos de la tarjeta si hay alguno
+      if (fieldsToUpdate.length > 0) {
+        const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
+        const queryValues = fieldsToUpdate.map(key => cardFields[key]);
+        queryValues.push(id);
+
+        const query = `
+          UPDATE cards 
+          SET ${setClause} 
+          WHERE id = $${queryValues.length} 
+          RETURNING *;
+        `;
+        
+        const result = await client.query(query, queryValues);
+        if (result.rowCount === 0) {
+          throw new Error('Tarjeta no encontrada');
+        }
+        updatedCard = result.rows[0] as Card;
+      } else {
+        // Si no hay campos de tarjeta para actualizar, obtener la tarjeta actual
+        const result = await client.query('SELECT * FROM cards WHERE id = $1', [id]);
+        if (result.rowCount === 0) {
+          throw new Error('Tarjeta no encontrada');
+        }
+        updatedCard = result.rows[0] as Card;
+      }
+
+      // Gestionar etiquetas si se proporcionaron
+      if (labels !== undefined) {
+        // Eliminar todas las etiquetas actuales de la tarjeta
+        await client.query('DELETE FROM card_labels WHERE card_id = $1', [id]);
+        
+        // Agregar las nuevas etiquetas
+        if (labels.length > 0) {
+          const labelValues = labels.map((label, index) => `($1, $${index + 2})`).join(', ');
+          const labelIds = labels.map(label => label.id);
+          
+          const insertQuery = `
+            INSERT INTO card_labels (card_id, label_id) 
+            VALUES ${labelValues}
+            ON CONFLICT (card_id, label_id) DO NOTHING
+          `;
+          
+          await client.query(insertQuery, [id, ...labelIds]);
+        }
+      }
+
+      await client.query('COMMIT');
+      return updatedCard;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en CardService.updateCard:', error);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    // Construcción dinámica de la cláusula SET
-    // ej: "title" = $1, "description" = $2
-    const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
-    
-    const queryValues = fieldsToUpdate.map(key => data[key]);
-    queryValues.push(id); // El último parámetro será el ID para la cláusula WHERE
-
-    const query = `
-      UPDATE cards 
-      SET ${setClause} 
-      WHERE id = $${queryValues.length} 
-      RETURNING *;
-    `;
-    
-    const result = await pool.query(query, queryValues);
-
-    if (result.rowCount === 0) {
-      return null; // La tarjeta no fue encontrada
-    }
-
-    return result.rows[0] as Card;
   }
 
   /**

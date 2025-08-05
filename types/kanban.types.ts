@@ -72,6 +72,7 @@ export interface UpdateCardPayload {
   title?: string;
   description?: string;
   image_url?: string;
+  labels?: Label[]; // Añadir soporte para actualizar etiquetas
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
 }
 
