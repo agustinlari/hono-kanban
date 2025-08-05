@@ -233,8 +233,17 @@ export function requirePermission(action: PermissionAction) {
           boardId = await PermissionService.getBoardIdFromCard(cardId);
         }
         
-        // NO usar c.req.param('id') aquí porque puede ser labelId, listId, etc.
-        // Cada tipo de entidad debe manejarse específicamente arriba
+        // Si no hay cardId específico, verificar si 'id' es un UUID (cardId)
+        if (!boardId) {
+          const idParam = c.req.param('id');
+          console.log(`🔍 Verificando si 'id' es un UUID: ${idParam}`);
+          // UUID pattern: 8-4-4-4-12 caracteres hexadecimales
+          const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (idParam && uuidPattern.test(idParam)) {
+            console.log(`✅ Es un UUID, tratando como cardId`);
+            boardId = await PermissionService.getBoardIdFromCard(idParam);
+          }
+        }
       }
     }
 
@@ -248,11 +257,18 @@ export function requirePermission(action: PermissionAction) {
     if (!boardId) {
       const labelIdParam = c.req.param('labelId') || c.req.param('id') || '';
       console.log(`🔍 [requirePermission] Parametro labelId encontrado: '${labelIdParam}'`);
-      const labelId = parseInt(labelIdParam);
-      console.log(`🔍 [requirePermission] LabelId parseado: ${labelId}, isNaN: ${isNaN(labelId)}`);
-      if (!isNaN(labelId)) {
-        boardId = await PermissionService.getBoardIdFromLabel(labelId);
-        console.log(`🔍 [requirePermission] BoardId obtenido desde label ${labelId}: ${boardId}`);
+      
+      // Solo intentar parsear como labelId si no es un UUID
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (labelIdParam && !uuidPattern.test(labelIdParam)) {
+        const labelId = parseInt(labelIdParam);
+        console.log(`🔍 [requirePermission] LabelId parseado: ${labelId}, isNaN: ${isNaN(labelId)}`);
+        if (!isNaN(labelId)) {
+          boardId = await PermissionService.getBoardIdFromLabel(labelId);
+          console.log(`🔍 [requirePermission] BoardId obtenido desde label ${labelId}: ${boardId}`);
+        }
+      } else if (labelIdParam) {
+        console.log(`🔍 [requirePermission] Parametro es un UUID, saltando lógica de labels`);
       }
     }
 
