@@ -227,11 +227,14 @@ export function requirePermission(action: PermissionAction) {
       
       // Fallback: obtener desde parámetros de URL
       if (!boardId) {
-        const cardId = c.req.param('cardId') || c.req.param('id');
+        const cardId = c.req.param('cardId');
         console.log(`🔍 cardId desde parámetros: ${cardId}`);
         if (cardId) {
           boardId = await PermissionService.getBoardIdFromCard(cardId);
         }
+        
+        // NO usar c.req.param('id') aquí porque puede ser labelId, listId, etc.
+        // Cada tipo de entidad debe manejarse específicamente arriba
       }
     }
 
