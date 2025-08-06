@@ -46,13 +46,13 @@ class AssignmentService {
 
       // Verificar que la tarjeta existe
       const cardCheck = await client.query('SELECT id FROM cards WHERE id = $1', [cardId]);
-      if (cardCheck.rowCount === 0) {
+      if (!cardCheck.rowCount || cardCheck.rowCount === 0) {
         throw new Error('La tarjeta especificada no existe');
       }
 
       // Verificar que el usuario a asignar existe
       const userCheck = await client.query('SELECT id, email, name FROM users WHERE id = $1', [userId]);
-      if (userCheck.rowCount === 0) {
+      if (!userCheck.rowCount || userCheck.rowCount === 0) {
         throw new Error('El usuario especificado no existe');
       }
 
@@ -62,7 +62,7 @@ class AssignmentService {
         [cardId, userId]
       );
 
-      if (existingAssignment.rowCount > 0) {
+      if (existingAssignment.rowCount && existingAssignment.rowCount > 0) {
         throw new Error('El usuario ya está asignado a esta tarjeta');
       }
 
@@ -113,7 +113,7 @@ class AssignmentService {
         [cardId, userId]
       );
 
-      if (assignmentCheck.rowCount === 0) {
+      if (!assignmentCheck.rowCount || assignmentCheck.rowCount === 0) {
         throw new Error('El usuario no está asignado a esta tarjeta');
       }
 
@@ -125,7 +125,7 @@ class AssignmentService {
 
       await client.query('COMMIT');
       
-      return deleteResult.rowCount > 0;
+      return deleteResult.rowCount !== null && deleteResult.rowCount > 0;
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -175,7 +175,7 @@ class AssignmentService {
 
       // Verificar que la tarjeta existe
       const cardCheck = await client.query('SELECT id FROM cards WHERE id = $1', [cardId]);
-      if (cardCheck.rowCount === 0) {
+      if (!cardCheck.rowCount || cardCheck.rowCount === 0) {
         throw new Error('La tarjeta especificada no existe');
       }
 
@@ -194,7 +194,7 @@ class AssignmentService {
         [userIds]
       );
 
-      if (usersCheck.rowCount !== userIds.length) {
+      if (!usersCheck.rowCount || usersCheck.rowCount !== userIds.length) {
         throw new Error('Uno o más usuarios especificados no existen');
       }
 
