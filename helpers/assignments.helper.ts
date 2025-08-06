@@ -206,7 +206,7 @@ class AssignmentService {
           [cardId, userId, assignedBy]
         );
 
-        const userData = usersCheck.rows.find(u => u.id === userId);
+        const userData = usersCheck.rows.find((u: any) => u.id === userId);
         assignments.push({
           id: insertResult.rows[0].id,
           card_id: cardId,
