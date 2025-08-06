@@ -225,6 +225,48 @@ class ArchivoService {
     }
   }
 
+  /**
+   * Elimina un thumbnail por su URL (enfoque simplificado)
+   * Solo elimina el archivo físico, no toca la base de datos
+   */
+  static async eliminarThumbnailPorUrl(imageUrl: string): Promise<boolean> {
+    console.log('🗑️ Eliminando thumbnail por URL:', imageUrl);
+    
+    try {
+      // Extraer el nombre del archivo de la URL
+      // URLs como: /public/kanban-uploads/filename.jpg
+      const urlParts = imageUrl.split('/');
+      const filename = urlParts[urlParts.length - 1];
+      
+      if (!filename) {
+        console.warn('No se pudo extraer el nombre del archivo de la URL:', imageUrl);
+        return false;
+      }
+      
+      // Construir la ruta completa del archivo
+      const rutaCompleta = path.join(UPLOADS_DIR, filename);
+      console.log('🗑️ Intentando eliminar archivo:', rutaCompleta);
+      
+      // Eliminar el archivo del filesystem
+      try {
+        await fs.unlink(rutaCompleta);
+        console.log('✅ Archivo eliminado exitosamente:', rutaCompleta);
+        return true;
+      } catch (unlinkError: any) {
+        if (unlinkError.code === 'ENOENT') {
+          console.warn('⚠️ Archivo no encontrado en disco:', rutaCompleta);
+          return true; // Consideramos éxito si ya no existe
+        } else {
+          console.error('💥 Error al eliminar archivo:', unlinkError);
+          throw unlinkError;
+        }
+      }
+    } catch (error) {
+      console.error('💥 Error procesando eliminación de thumbnail:', error);
+      throw error;
+    }
+  }
+
   // Añade este método DENTRO de la clase ArchivoService
 
   static async desvincularYLimpiarArchivoDeCard(cardId: string, archivoId: number): Promise<{ mensaje: string }> {
@@ -604,6 +646,36 @@ class ArchivoController {
       return c.json({ error: errorMessage }, 500);
     }
   }
+
+  static async eliminarThumbnailPorUrl(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const cardId = c.req.param('cardId');
+    if (!cardId) return c.json({ error: 'ID de tarjeta requerido' }, 400);
+
+    try {
+      const { image_url } = await c.req.json();
+      if (!image_url) {
+        return c.json({ error: 'image_url es requerido' }, 400);
+      }
+
+      console.log(`🗑️ Eliminando thumbnail de tarjeta ${cardId}:`, image_url);
+      
+      // Eliminar el archivo físico
+      const eliminado = await ArchivoService.eliminarThumbnailPorUrl(image_url);
+      
+      if (eliminado) {
+        return c.json({ mensaje: 'Thumbnail eliminado exitosamente' });
+      } else {
+        return c.json({ error: 'No se pudo eliminar el thumbnail' }, 500);
+      }
+    } catch (error: any) {
+      console.error(`Error al eliminar thumbnail de tarjeta ${cardId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Error interno al eliminar el thumbnail';
+      return c.json({ error: errorMessage }, 500);
+    }
+  }
 }
 
 
@@ -620,6 +692,7 @@ archivoRoutes.delete('/archivos/:id', authMiddleware, ArchivoController.borrarAr
 // Rutas específicas para tarjetas
 archivoRoutes.get('/cards/:cardId/archivos', authMiddleware, ArchivoController.obtenerArchivosCard);
 archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', authMiddleware, ArchivoController.desvincularArchivoDeCard);
+archivoRoutes.delete('/cards/:cardId/thumbnail', authMiddleware, ArchivoController.eliminarThumbnailPorUrl);
 archivoRoutes.get('/cards/:cardId/estado', authMiddleware, ArchivoController.verificarEstadoCard);
 
 // Ruta temporal para migrar URLs existentes (solo admin)
