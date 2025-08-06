@@ -23,6 +23,7 @@ export interface Card {
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
+    assignees?: CardAssignee[]; // Usuarios asignados a la tarjeta
 }
 
 // Refleja la tabla 'lists' de la BBDD, pero le añadimos un array para contener sus tarjetas
@@ -77,6 +78,7 @@ export interface UpdateCardPayload {
   start_date?: Date | null;
   due_date?: Date | null;
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
+  assignees?: number[]; // IDs de usuarios asignados
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
 }
 
@@ -138,3 +140,44 @@ export const LABEL_COLORS = [
   { name: 'Verde Lima', value: '#51E898' },
   { name: 'Cielo', value: '#00C2E0' }
 ] as const;
+
+// ===================================================================
+// TIPOS PARA EL SISTEMA DE ASIGNACIONES DE USUARIOS
+// ===================================================================
+
+/**
+ * Interfaz para un usuario asignado a una tarjeta
+ */
+export interface CardAssignee {
+  id: number;
+  user_id: number;
+  card_id: string;
+  user_email: string;
+  user_name?: string;
+  assigned_by: number;
+  assigned_at: Date;
+}
+
+/**
+ * Payload para asignar un usuario a una tarjeta
+ */
+export interface AssignUserPayload {
+  card_id: string;
+  user_id: number;
+}
+
+/**
+ * Payload para desasignar un usuario de una tarjeta
+ */
+export interface UnassignUserPayload {
+  card_id: string;
+  user_id: number;
+}
+
+/**
+ * Respuesta de la API con información de asignación
+ */
+export interface AssignmentResponse {
+  message: string;
+  assignment?: CardAssignee;
+}

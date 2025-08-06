@@ -14,6 +14,7 @@ import { listRoutes } from '../helpers/lists.helper';
 import { cardRoutes } from '../helpers/cards.helper';
 import { labelRoutes } from '../helpers/labels.helper';
 import { permissionRoutes } from '../helpers/permissions.helper';
+import { assignmentRoutes } from '../helpers/assignments.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -50,3 +51,4 @@ routes.route('/', listRoutes);
 routes.route('/', cardRoutes);
 routes.route('/', labelRoutes);
 routes.route('/', permissionRoutes);
+routes.route('/', assignmentRoutes);

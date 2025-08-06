@@ -47,7 +47,25 @@ class BoardService {
     `;
     const listsAndCardsResult = await pool.query(listsAndCardsQuery, [id]);
 
-    // 3. Obtener todas las etiquetas de las tarjetas de este tablero
+    // 3. Obtener todos los usuarios asignados a las tarjetas de este tablero
+    const assigneesQuery = `
+      SELECT 
+        ca.id,
+        ca.card_id,
+        ca.user_id,
+        ca.assigned_by,
+        ca.assigned_at,
+        u.email as user_email,
+        u.name as user_name
+      FROM card_assignments ca
+      INNER JOIN users u ON ca.user_id = u.id
+      INNER JOIN cards c ON ca.card_id = c.id
+      INNER JOIN lists l ON c.list_id = l.id
+      WHERE l.board_id = $1
+    `;
+    const assigneesResult = await pool.query(assigneesQuery, [id]);
+
+    // 4. Obtener todas las etiquetas de las tarjetas de este tablero
     const labelsQuery = `
       SELECT 
         cl.card_id,
@@ -62,7 +80,24 @@ class BoardService {
     `;
     const labelsResult = await pool.query(labelsQuery, [id]);
 
-    // 4. Crear un mapa de etiquetas por tarjeta
+    // 4. Crear un mapa de usuarios asignados por tarjeta
+    const cardAssigneesMap = new Map<string, any[]>();
+    for (const assigneeRow of assigneesResult.rows) {
+      if (!cardAssigneesMap.has(assigneeRow.card_id)) {
+        cardAssigneesMap.set(assigneeRow.card_id, []);
+      }
+      cardAssigneesMap.get(assigneeRow.card_id)!.push({
+        id: assigneeRow.id,
+        user_id: assigneeRow.user_id,
+        card_id: assigneeRow.card_id,
+        user_email: assigneeRow.user_email,
+        user_name: assigneeRow.user_name,
+        assigned_by: assigneeRow.assigned_by,
+        assigned_at: assigneeRow.assigned_at
+      });
+    }
+
+    // 5. Crear un mapa de etiquetas por tarjeta
     const cardLabelsMap = new Map<string, any[]>();
     for (const labelRow of labelsResult.rows) {
       if (!cardLabelsMap.has(labelRow.card_id)) {
@@ -109,7 +144,8 @@ class BoardService {
           due_date: row.due_date || null,
           created_at: new Date(),
           updated_at: new Date(),
-          labels: cardLabelsMap.get(row.card_id) || []
+          labels: cardLabelsMap.get(row.card_id) || [],
+          assignees: cardAssigneesMap.get(row.card_id) || []
         });
       }
     }

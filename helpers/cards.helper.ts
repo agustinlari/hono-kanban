@@ -77,8 +77,8 @@ class CardService {
         }
       }
 
-      // Separar campos de la tabla cards de las etiquetas
-      const { labels, ...cardFields } = data;
+      // Separar campos de la tabla cards de las etiquetas y assignees
+      const { labels, assignees, ...cardFields } = data;
       const fieldsToUpdate = Object.keys(cardFields) as Array<keyof Omit<UpdateCardPayload, 'labels'>>;
       
       let updatedCard: Card | null = null;
@@ -137,6 +137,37 @@ class CardService {
           
           await client.query(insertQuery, [id, ...labelIds]);
         }
+      }
+
+      // Gestionar asignaciones de usuarios si se proporcionaron
+      if (assignees !== undefined) {
+        console.log('🔍 [CardService.updateCard] Actualizando asignaciones:', assignees);
+        
+        // Eliminar asignaciones actuales
+        await client.query('DELETE FROM card_assignments WHERE card_id = $1', [id]);
+
+        // Agregar nuevas asignaciones
+        if (assignees.length > 0) {
+          // Verificar que todos los usuarios existen
+          const usersCheck = await client.query(
+            'SELECT id FROM users WHERE id = ANY($1)',
+            [assignees]
+          );
+
+          if (usersCheck.rowCount !== assignees.length) {
+            throw new Error('Uno o más usuarios especificados no existen');
+          }
+
+          // Insertar nuevas asignaciones
+          for (const userId of assignees) {
+            await client.query(
+              'INSERT INTO card_assignments (card_id, user_id, assigned_by) VALUES ($1, $2, $3)',
+              [id, userId, 1] // TODO: Usar el ID del usuario que está haciendo la asignación
+            );
+          }
+        }
+
+        console.log('✅ [CardService.updateCard] Asignaciones actualizadas');
       }
 
       await client.query('COMMIT');
