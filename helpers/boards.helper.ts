@@ -38,7 +38,8 @@ class BoardService {
     const listsAndCardsQuery = `
       SELECT 
         l.id as list_id, l.title as list_title, l.position as list_position,
-        c.id as card_id, c.title as card_title, c.description, c.position as card_position, c.image_url
+        c.id as card_id, c.title as card_title, c.description, c.position as card_position, 
+        c.image_url, c.start_date, c.due_date
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
       WHERE l.board_id = $1
@@ -104,6 +105,8 @@ class BoardService {
           position: row.card_position,
           image_url: row.image_url,
           list_id: row.list_id,
+          start_date: row.start_date || null,
+          due_date: row.due_date || null,
           created_at: new Date(),
           updated_at: new Date(),
           labels: cardLabelsMap.get(row.card_id) || []
