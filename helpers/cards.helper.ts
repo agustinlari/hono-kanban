@@ -150,7 +150,7 @@ class CardService {
         if (assignees.length > 0) {
           // Verificar que todos los usuarios existen
           const usersCheck = await client.query(
-            'SELECT id FROM users WHERE id = ANY($1)',
+            'SELECT id FROM usuarios WHERE id = ANY($1)',
             [assignees]
           );
 

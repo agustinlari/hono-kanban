@@ -27,7 +27,7 @@ class AssignmentService {
         u.email as user_email,
         u.name as user_name
       FROM card_assignments ca
-      INNER JOIN users u ON ca.user_id = u.id
+      INNER JOIN usuarios u ON ca.user_id = u.id
       WHERE ca.card_id = $1
       ORDER BY ca.assigned_at ASC
     `;
@@ -51,7 +51,7 @@ class AssignmentService {
       }
 
       // Verificar que el usuario a asignar existe
-      const userCheck = await client.query('SELECT id, email, name FROM users WHERE id = $1', [userId]);
+      const userCheck = await client.query('SELECT id, email, name FROM usuarios WHERE id = $1', [userId]);
       if (!userCheck.rowCount || userCheck.rowCount === 0) {
         throw new Error('El usuario especificado no existe');
       }
@@ -190,7 +190,7 @@ class AssignmentService {
 
       // Verificar que todos los usuarios existen
       const usersCheck = await client.query(
-        'SELECT id, email, name FROM users WHERE id = ANY($1)',
+        'SELECT id, email, name FROM usuarios WHERE id = ANY($1)',
         [userIds]
       );
 
