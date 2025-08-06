@@ -226,13 +226,16 @@ class ArchivoService {
   }
 
   /**
-   * Elimina un thumbnail por su URL (enfoque simplificado)
-   * Solo elimina el archivo físico, no toca la base de datos
+   * Elimina un thumbnail por su URL (elimina archivo físico + registro en BD)
+   * Opción B: Mantener consistencia con la tabla archivos
    */
   static async eliminarThumbnailPorUrl(imageUrl: string): Promise<boolean> {
     console.log('🗑️ Eliminando thumbnail por URL:', imageUrl);
     
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN');
+      
       // Extraer el nombre del archivo de la URL
       // URLs como: /public/kanban-uploads/filename.jpg
       const urlParts = imageUrl.split('/');
@@ -240,30 +243,73 @@ class ArchivoService {
       
       if (!filename) {
         console.warn('No se pudo extraer el nombre del archivo de la URL:', imageUrl);
+        await client.query('ROLLBACK');
         return false;
       }
       
-      // Construir la ruta completa del archivo
-      const rutaCompleta = path.join(UPLOADS_DIR, filename);
-      console.log('🗑️ Intentando eliminar archivo:', rutaCompleta);
+      console.log('🔍 Buscando archivo en BD por nombre_guardado:', filename);
       
-      // Eliminar el archivo del filesystem
+      // Buscar el archivo en la base de datos por nombre_guardado
+      const archivoResult = await client.query(
+        'SELECT id, ruta_relativa FROM archivos WHERE nombre_guardado = $1',
+        [filename]
+      );
+      
+      if (archivoResult.rows.length === 0) {
+        console.warn('⚠️ No se encontró el archivo en la BD:', filename);
+        // Intentar eliminar solo el archivo físico como fallback
+        const rutaCompleta = path.join(UPLOADS_DIR, filename);
+        try {
+          await fs.unlink(rutaCompleta);
+          console.log('✅ Archivo físico eliminado (sin registro en BD):', rutaCompleta);
+        } catch (unlinkError: any) {
+          if (unlinkError.code !== 'ENOENT') {
+            console.error('💥 Error eliminando archivo físico:', unlinkError);
+          }
+        }
+        await client.query('COMMIT');
+        return true;
+      }
+      
+      const archivo = archivoResult.rows[0];
+      console.log('📄 Archivo encontrado en BD:', archivo);
+      
+      // Eliminar el archivo físico
+      const rutaCompleta = path.join(UPLOADS_DIR, archivo.ruta_relativa);
+      console.log('🗑️ Eliminando archivo físico:', rutaCompleta);
+      
       try {
         await fs.unlink(rutaCompleta);
-        console.log('✅ Archivo eliminado exitosamente:', rutaCompleta);
-        return true;
+        console.log('✅ Archivo físico eliminado:', rutaCompleta);
       } catch (unlinkError: any) {
         if (unlinkError.code === 'ENOENT') {
-          console.warn('⚠️ Archivo no encontrado en disco:', rutaCompleta);
-          return true; // Consideramos éxito si ya no existe
+          console.warn('⚠️ Archivo físico no encontrado en disco:', rutaCompleta);
         } else {
-          console.error('💥 Error al eliminar archivo:', unlinkError);
+          console.error('💥 Error al eliminar archivo físico:', unlinkError);
           throw unlinkError;
         }
       }
+      
+      // Eliminar asociaciones en card_attachments (si existen)
+      console.log('🗑️ Eliminando asociaciones en card_attachments para archivo ID:', archivo.id);
+      const attachmentsResult = await client.query('DELETE FROM card_attachments WHERE archivo_id = $1', [archivo.id]);
+      console.log('✅ Asociaciones eliminadas de card_attachments:', attachmentsResult.rowCount);
+      
+      // Eliminar el registro de la tabla archivos (esto se hace al final por las FK)
+      console.log('🗑️ Eliminando registro de archivos, ID:', archivo.id);
+      const deleteResult = await client.query('DELETE FROM archivos WHERE id = $1', [archivo.id]);
+      console.log('✅ Registros eliminados de archivos:', deleteResult.rowCount);
+      
+      await client.query('COMMIT');
+      console.log('🎉 Thumbnail eliminado completamente (archivo físico + card_attachments + archivos)');
+      return true;
+      
     } catch (error) {
+      await client.query('ROLLBACK');
       console.error('💥 Error procesando eliminación de thumbnail:', error);
       throw error;
+    } finally {
+      client.release();
     }
   }
 
