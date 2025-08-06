@@ -29,7 +29,7 @@ class BoardService {
   static async getBoardById(id: number): Promise<Board | null> {
     // 1. Obtener la información del tablero
     const boardResult = await pool.query('SELECT * FROM boards WHERE id = $1', [id]);
-    if (boardResult.rowCount === 0) {
+    if (!boardResult.rowCount || boardResult.rowCount === 0) {
       return null;
     }
     const boardData = boardResult.rows[0];
@@ -162,7 +162,7 @@ class BoardService {
     static async getListsByBoardId(boardId: number): Promise<Omit<List, 'cards'>[] | null> {
     // Primero, comprobamos si el tablero existe para dar un buen error 404
     const boardCheck = await pool.query('SELECT id FROM boards WHERE id = $1', [boardId]);
-    if (boardCheck.rowCount === 0) {
+    if (!boardCheck.rowCount || boardCheck.rowCount === 0) {
       return null; // Devuelve null para que el controlador sepa que es un 404
     }
 
@@ -200,7 +200,7 @@ class BoardService {
 
       // 1. Verificar que el tablero existe
       const boardCheck = await client.query('SELECT id FROM boards WHERE id = $1', [id]);
-      if (boardCheck.rowCount === 0) {
+      if (!boardCheck.rowCount || boardCheck.rowCount === 0) {
         await client.query('ROLLBACK');
         return false; // El tablero no existe
       }
