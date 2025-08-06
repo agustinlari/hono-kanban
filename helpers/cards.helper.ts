@@ -8,6 +8,7 @@ import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
 import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload } from '../types/kanban.types';
+import { validateDates, formatDateForDB, parseDate } from '../utils/dateUtils';
 
 // ================================
 // Lógica de Servicio (CardService)
@@ -61,6 +62,17 @@ class CardService {
     try {
       await client.query('BEGIN');
 
+      // Validar fechas si se proporcionaron
+      if (data.start_date || data.due_date) {
+        const startDate = data.start_date ? parseDate(data.start_date.toISOString()) : null;
+        const dueDate = data.due_date ? parseDate(data.due_date.toISOString()) : null;
+        
+        const validation = validateDates(startDate, dueDate);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+      }
+
       // Separar campos de la tabla cards de las etiquetas
       const { labels, ...cardFields } = data;
       const fieldsToUpdate = Object.keys(cardFields) as Array<keyof Omit<UpdateCardPayload, 'labels'>>;
@@ -75,7 +87,7 @@ class CardService {
 
         const query = `
           UPDATE cards 
-          SET ${setClause} 
+          SET ${setClause}, updated_at = NOW()
           WHERE id = $${queryValues.length} 
           RETURNING *;
         `;

@@ -18,6 +18,8 @@ export interface Card {
     position: number;
     image_url: string | null;
     list_id: number;
+    start_date: Date | null;
+    due_date: Date | null;
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
@@ -72,6 +74,8 @@ export interface UpdateCardPayload {
   title?: string;
   description?: string;
   image_url?: string;
+  start_date?: Date | null;
+  due_date?: Date | null;
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
 }
