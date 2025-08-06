@@ -56,7 +56,7 @@ class BoardService {
         ca.assigned_by,
         ca.assigned_at,
         u.email as user_email,
-        u.name as user_name
+        u.email as user_name
       FROM card_assignments ca
       INNER JOIN usuarios u ON ca.user_id = u.id
       INNER JOIN cards c ON ca.card_id = c.id
