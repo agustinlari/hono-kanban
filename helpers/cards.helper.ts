@@ -79,7 +79,7 @@ class CardService {
 
       // Separar campos de la tabla cards de las etiquetas y assignees
       const { labels, assignees, ...cardFields } = data;
-      const fieldsToUpdate = Object.keys(cardFields) as Array<keyof Omit<UpdateCardPayload, 'labels'>>;
+      const fieldsToUpdate = Object.keys(cardFields) as Array<keyof Omit<UpdateCardPayload, 'labels' | 'assignees'>>;
       
       let updatedCard: Card | null = null;
 
