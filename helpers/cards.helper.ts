@@ -64,8 +64,12 @@ class CardService {
 
       // Validar fechas si se proporcionaron
       if (data.start_date || data.due_date) {
-        const startDate = data.start_date ? parseDate(data.start_date.toISOString()) : null;
-        const dueDate = data.due_date ? parseDate(data.due_date.toISOString()) : null;
+        const startDate = data.start_date ? 
+          (typeof data.start_date === 'string' ? parseDate(data.start_date) : parseDate(data.start_date.toISOString())) 
+          : null;
+        const dueDate = data.due_date ? 
+          (typeof data.due_date === 'string' ? parseDate(data.due_date) : parseDate(data.due_date.toISOString())) 
+          : null;
         
         const validation = validateDates(startDate, dueDate);
         if (!validation.valid) {
@@ -92,11 +96,20 @@ class CardService {
           RETURNING *;
         `;
         
-        const result = await client.query(query, queryValues);
-        if (result.rowCount === 0) {
-          throw new Error('Tarjeta no encontrada');
+        console.log('🔍 [CardService.updateCard] Query:', query);
+        console.log('🔍 [CardService.updateCard] Values:', queryValues);
+        
+        try {
+          const result = await client.query(query, queryValues);
+          if (result.rowCount === 0) {
+            throw new Error('Tarjeta no encontrada');
+          }
+          updatedCard = result.rows[0] as Card;
+          console.log('✅ [CardService.updateCard] Tarjeta actualizada exitosamente');
+        } catch (dbError) {
+          console.error('💥 [CardService.updateCard] Error de base de datos:', dbError);
+          throw new Error(`Error actualizando tarjeta: ${(dbError as Error).message}`);
         }
-        updatedCard = result.rows[0] as Card;
       } else {
         // Si no hay campos de tarjeta para actualizar, obtener la tarjeta actual
         const result = await client.query('SELECT * FROM cards WHERE id = $1', [id]);
