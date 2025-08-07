@@ -202,7 +202,11 @@ class KeycloakAuthController {
    */
   static async login(c: Context) {
     try {
+      console.log('🎯 [LoginController] Petición recibida');
+      console.log('🎯 [LoginController] Headers:', Object.fromEntries(c.req.raw.headers.entries()));
+      
       const { username, password } = await c.req.json();
+      console.log('🎯 [LoginController] Username recibido:', username);
 
       if (!username || !password) {
         return c.json({ 
