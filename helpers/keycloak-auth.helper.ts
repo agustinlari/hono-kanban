@@ -21,6 +21,10 @@ class KeycloakAuthService {
    */
   static async login(username: string, password: string) {
     try {
+      console.log('🔐 [KeycloakAuth] Iniciando login para:', username);
+      console.log('🔗 [KeycloakAuth] URL:', KEYCLOAK_TOKEN_URL);
+      console.log('🆔 [KeycloakAuth] Client ID:', KEYCLOAK_CLIENT_ID);
+      
       // 1. Obtener token de Keycloak
       const response = await fetch(KEYCLOAK_TOKEN_URL, {
         method: 'POST',
@@ -35,8 +39,11 @@ class KeycloakAuthService {
         }),
       });
 
+      console.log('📡 [KeycloakAuth] Respuesta Keycloak status:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('❌ [KeycloakAuth] Error de Keycloak:', errorData);
         throw new Error(errorData.error_description || 'Credenciales inválidas');
       }
 
