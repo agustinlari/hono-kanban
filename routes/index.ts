@@ -44,6 +44,12 @@ routes.get('/test-cors', (c) => {
   return c.json({ message: 'CORS test successful', timestamp: new Date().toISOString() });
 });
 
+// --- Debug middleware para ver todas las peticiones ---
+routes.use('*', (c, next) => {
+  console.log('📋 [Routes] Petición recibida:', c.req.method, c.req.url);
+  return next();
+});
+
 // --- Montar todas las rutas modulares de la API ---
 routes.route('/', authRoutes);
 routes.route('/', archivoRoutes);

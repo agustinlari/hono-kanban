@@ -299,6 +299,12 @@ class KeycloakAuthController {
 // ================================
 export const keycloakAuthRoutes = new Hono<{ Variables: Variables }>();
 
+// Debug middleware para keycloak routes
+keycloakAuthRoutes.use('*', (c, next) => {
+  console.log('🔐 [KeycloakRoutes] Petición:', c.req.method, c.req.url);
+  return next();
+});
+
 // Rutas públicas de autenticación
 keycloakAuthRoutes.post('/auth/keycloak/login', KeycloakAuthController.login);
 keycloakAuthRoutes.post('/auth/keycloak/refresh', KeycloakAuthController.refresh);
