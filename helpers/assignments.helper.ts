@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database';
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
@@ -376,12 +376,12 @@ class AssignmentController {
 export const assignmentRoutes = new Hono<{ Variables: Variables }>();
 
 // Rutas para gestionar asignaciones de tarjetas
-assignmentRoutes.get('/cards/:cardId/assignees', authMiddleware, AssignmentController.getCardAssignees);
-assignmentRoutes.post('/cards/:cardId/assignees', authMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.assignUserToCard);
-assignmentRoutes.delete('/cards/:cardId/assignees/:userId', authMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.unassignUserFromCard);
-assignmentRoutes.put('/cards/:cardId/assignees', authMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.updateCardAssignments);
+assignmentRoutes.get('/cards/:cardId/assignees', keycloakAuthMiddleware, AssignmentController.getCardAssignees);
+assignmentRoutes.post('/cards/:cardId/assignees', keycloakAuthMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.assignUserToCard);
+assignmentRoutes.delete('/cards/:cardId/assignees/:userId', keycloakAuthMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.unassignUserFromCard);
+assignmentRoutes.put('/cards/:cardId/assignees', keycloakAuthMiddleware, requirePermission(PermissionAction.EDIT_CARDS), AssignmentController.updateCardAssignments);
 
 // Ruta para obtener tarjetas asignadas al usuario actual
-assignmentRoutes.get('/users/me/assigned-cards', authMiddleware, AssignmentController.getUserAssignedCards);
+assignmentRoutes.get('/users/me/assigned-cards', keycloakAuthMiddleware, AssignmentController.getUserAssignedCards);
 
 export { AssignmentService };

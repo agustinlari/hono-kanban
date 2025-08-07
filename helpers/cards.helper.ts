@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database'; 
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
@@ -434,7 +434,7 @@ class CardController {
 // ================================
 export const cardRoutes = new Hono<{ Variables: Variables }>();
 
-cardRoutes.use('*', authMiddleware);
+cardRoutes.use('*', keycloakAuthMiddleware);
 
 // Endpoint para crear una nueva tarjeta
 cardRoutes.post('/cards', requirePermission(PermissionAction.CREATE_CARDS), CardController.create);

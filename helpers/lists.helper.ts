@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database'; 
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import type { Variables } from '../types';
 import type { List, CreateListPayload } from '../types/kanban.types';
 
@@ -178,7 +178,7 @@ class ListController {
 export const listRoutes = new Hono<{ Variables: Variables }>();
 
 // Todas las rutas de listas también requerirán autenticación.
-listRoutes.use('*', authMiddleware);
+listRoutes.use('*', keycloakAuthMiddleware);
 
 // Endpoint para crear una nueva lista
 listRoutes.post('/lists', ListController.create);

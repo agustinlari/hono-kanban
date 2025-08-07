@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database'; 
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import type { Variables } from '../types';
 import type { Board, List, Card, CreateBoardPayload } from '../types/kanban.types';
 import { requireBoardAccess, requireOwnership } from '../middleware/permissions';
@@ -353,7 +353,7 @@ class BoardController {
 export const boardRoutes = new Hono<{ Variables: Variables }>();
 
 // Todas las rutas de tableros requerirán autenticación
-boardRoutes.use('*', authMiddleware);
+boardRoutes.use('*', keycloakAuthMiddleware);
 // Nota: /boards (getAll) ahora se maneja desde permissionRoutes.getUserBoards()
 boardRoutes.get('/boards/:id', requireBoardAccess(), BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);

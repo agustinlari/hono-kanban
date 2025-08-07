@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database';
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import { requireOwnership, requirePermission, requireBoardAccess } from '../middleware/permissions';
 import type { Variables, BoardMember, PermissionRole, AddMemberPayload, UpdateMemberPermissionsPayload, RemoveMemberPayload } from '../types';
 import { PermissionAction } from '../types';
@@ -536,7 +536,7 @@ class PermissionController {
 // ================================
 export const permissionRoutes = new Hono<{ Variables: Variables }>();
 
-permissionRoutes.use('*', authMiddleware);
+permissionRoutes.use('*', keycloakAuthMiddleware);
 
 // Rutas de miembros del tablero
 permissionRoutes.get('/boards/:boardId/members', requireBoardAccess(), PermissionController.getBoardMembers);

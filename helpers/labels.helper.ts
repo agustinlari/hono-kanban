@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { pool } from '../config/database';
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import { requirePermission, requireBoardAccess } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
@@ -423,7 +423,7 @@ class LabelController {
 // ================================
 export const labelRoutes = new Hono<{ Variables: Variables }>();
 
-labelRoutes.use('*', authMiddleware);
+labelRoutes.use('*', keycloakAuthMiddleware);
 
 // Rutas de etiquetas por tablero
 labelRoutes.get('/boards/:boardId/labels', requireBoardAccess(), LabelController.getByBoardId);

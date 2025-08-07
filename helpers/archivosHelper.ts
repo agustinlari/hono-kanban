@@ -1,7 +1,7 @@
 // src/helpers/archivosHelper.ts
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { authMiddleware } from '../middleware/auth';
+import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import type { Variables } from '../types';
 
 // Importaciones necesarias de la lógica del servicio y controlador
@@ -731,18 +731,18 @@ class ArchivoController {
 
 export const archivoRoutes = new Hono<{ Variables: Variables }>();
 
-archivoRoutes.post('/archivos/subir', authMiddleware, ArchivoController.subirArchivo);
+archivoRoutes.post('/archivos/subir', keycloakAuthMiddleware, ArchivoController.subirArchivo);
 archivoRoutes.get('/archivos/:id/descargar', ArchivoController.descargarArchivo); // Sin authMiddleware para permitir acceso público a imágenes de tarjetas
-archivoRoutes.delete('/archivos/:id', authMiddleware, ArchivoController.borrarArchivo);
+archivoRoutes.delete('/archivos/:id', keycloakAuthMiddleware, ArchivoController.borrarArchivo);
 
 // Rutas específicas para tarjetas
-archivoRoutes.get('/cards/:cardId/archivos', authMiddleware, ArchivoController.obtenerArchivosCard);
-archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', authMiddleware, ArchivoController.desvincularArchivoDeCard);
-archivoRoutes.delete('/cards/:cardId/thumbnail', authMiddleware, ArchivoController.eliminarThumbnailPorUrl);
-archivoRoutes.get('/cards/:cardId/estado', authMiddleware, ArchivoController.verificarEstadoCard);
+archivoRoutes.get('/cards/:cardId/archivos', keycloakAuthMiddleware, ArchivoController.obtenerArchivosCard);
+archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', keycloakAuthMiddleware, ArchivoController.desvincularArchivoDeCard);
+archivoRoutes.delete('/cards/:cardId/thumbnail', keycloakAuthMiddleware, ArchivoController.eliminarThumbnailPorUrl);
+archivoRoutes.get('/cards/:cardId/estado', keycloakAuthMiddleware, ArchivoController.verificarEstadoCard);
 
 // Ruta temporal para migrar URLs existentes (solo admin)
-archivoRoutes.post('/archivos/migrar-urls', authMiddleware, ArchivoController.migrarUrls);
+archivoRoutes.post('/archivos/migrar-urls', keycloakAuthMiddleware, ArchivoController.migrarUrls);
 
 // Ruta temporal PÚBLICA para migración de emergencia (ELIMINAR después de usar)
 archivoRoutes.post('/archivos/migrar-urls-publico', ArchivoController.migrarUrls);
