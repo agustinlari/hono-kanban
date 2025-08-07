@@ -305,12 +305,12 @@ keycloakAuthRoutes.use('*', (c, next) => {
   return next();
 });
 
-// Rutas públicas de autenticación
+// Rutas públicas de autenticación (SIN middleware de auth)
 keycloakAuthRoutes.post('/auth/keycloak/login', KeycloakAuthController.login);
 keycloakAuthRoutes.post('/auth/keycloak/refresh', KeycloakAuthController.refresh);
 keycloakAuthRoutes.post('/auth/keycloak/logout', KeycloakAuthController.logout);
 
-// Ruta protegida para información del usuario
-keycloakAuthRoutes.get('/auth/keycloak/me', KeycloakAuthController.me);
+// Ruta protegida para información del usuario (CON middleware de auth)
+keycloakAuthRoutes.get('/auth/keycloak/me', keycloakAuthMiddleware, KeycloakAuthController.me);
 
 export { KeycloakAuthService, KeycloakAuthController };
