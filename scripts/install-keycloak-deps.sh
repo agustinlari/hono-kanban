@@ -16,8 +16,7 @@ fi
 echo "📦 Instalando jsonwebtoken y jwks-rsa..."
 npm install jsonwebtoken@^9.0.2 jwks-rsa@^3.1.0
 
-echo "📦 Instalando tipos de TypeScript..."
-npm install -D @types/jwks-rsa@^3.0.0
+echo "📦 Los tipos para jwks-rsa vienen incluidos con el paquete..."
 
 # Verificar instalación
 echo "✅ Verificando instalación..."

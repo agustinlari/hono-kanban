@@ -1,6 +1,6 @@
 // helpers/keycloak.helper.ts - Integración con Keycloak
 import jwt from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+import jwksClient, { type JwksClient } from 'jwks-rsa';
 import { 
   KEYCLOAK_BASE_URL, 
   KEYCLOAK_REALM, 
