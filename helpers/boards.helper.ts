@@ -194,14 +194,26 @@ class BoardService {
         const boardResult = await client.query(boardQuery, [name, description, ownerId]);
         const newBoard = boardResult.rows[0];
 
-        // 2. Añadir al owner como miembro con permisos completos
+        // 2. Añadir al owner como miembro con permisos completos (si no existe ya)
         const memberQuery = `
           INSERT INTO board_members (
             board_id, user_id, invited_by,
             can_view, can_create_cards, can_edit_cards, can_move_cards,
             can_delete_cards, can_manage_labels, can_add_members,
             can_remove_members, can_edit_board, can_delete_board
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`;
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          ON CONFLICT (board_id, user_id) DO UPDATE SET
+            can_view = EXCLUDED.can_view,
+            can_create_cards = EXCLUDED.can_create_cards,
+            can_edit_cards = EXCLUDED.can_edit_cards,
+            can_move_cards = EXCLUDED.can_move_cards,
+            can_delete_cards = EXCLUDED.can_delete_cards,
+            can_manage_labels = EXCLUDED.can_manage_labels,
+            can_add_members = EXCLUDED.can_add_members,
+            can_remove_members = EXCLUDED.can_remove_members,
+            can_edit_board = EXCLUDED.can_edit_board,
+            can_delete_board = EXCLUDED.can_delete_board,
+            updated_at = NOW()`;
         
         await client.query(memberQuery, [
           newBoard.id, ownerId, ownerId, // invited_by es el mismo owner
