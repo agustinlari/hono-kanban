@@ -311,6 +311,6 @@ keycloakAuthRoutes.post('/auth/keycloak/refresh', KeycloakAuthController.refresh
 keycloakAuthRoutes.post('/auth/keycloak/logout', KeycloakAuthController.logout);
 
 // Ruta protegida para información del usuario (CON middleware de auth)
-keycloakAuthRoutes.get('/auth/keycloak/me', keycloakAuthMiddleware, KeycloakAuthController.me);
+keycloakAuthRoutes.get('/auth/keycloak/me', KeycloakAuthController.me);
 
 export { KeycloakAuthService, KeycloakAuthController };
