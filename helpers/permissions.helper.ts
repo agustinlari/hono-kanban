@@ -94,7 +94,8 @@ class BoardPermissionService {
         can_manage_labels: false,
         can_add_members: false,
         can_remove_members: false,
-        can_edit_board: false
+        can_edit_board: false,
+        can_delete_board: false
       };
 
       if (role_name) {
@@ -111,7 +112,8 @@ class BoardPermissionService {
           can_manage_labels: role.can_manage_labels,
           can_add_members: role.can_add_members,
           can_remove_members: role.can_remove_members,
-          can_edit_board: role.can_edit_board
+          can_edit_board: role.can_edit_board,
+          can_delete_board: role.can_delete_board
         };
       } else if (permissions) {
         finalPermissions = { ...finalPermissions, ...permissions };
@@ -123,8 +125,8 @@ class BoardPermissionService {
           board_id, user_id, invited_by,
           can_view, can_create_cards, can_edit_cards, can_move_cards,
           can_delete_cards, can_manage_labels, can_add_members, 
-          can_remove_members, can_edit_board
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          can_remove_members, can_edit_board, can_delete_board
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *
       `;
       
@@ -134,7 +136,7 @@ class BoardPermissionService {
         finalPermissions.can_edit_cards, finalPermissions.can_move_cards,
         finalPermissions.can_delete_cards, finalPermissions.can_manage_labels,
         finalPermissions.can_add_members, finalPermissions.can_remove_members,
-        finalPermissions.can_edit_board
+        finalPermissions.can_edit_board, finalPermissions.can_delete_board
       ]);
 
       await client.query('COMMIT');
@@ -243,7 +245,7 @@ class BoardPermissionService {
         (b.owner_id = $1) as is_owner,
         bm.can_view, bm.can_create_cards, bm.can_edit_cards, bm.can_move_cards,
         bm.can_delete_cards, bm.can_manage_labels, bm.can_add_members,
-        bm.can_remove_members, bm.can_edit_board, bm.joined_at
+        bm.can_remove_members, bm.can_edit_board, bm.can_delete_board, bm.joined_at
       FROM board_members bm
       INNER JOIN boards b ON bm.board_id = b.id
       WHERE bm.user_id = $1 AND bm.can_view = TRUE
@@ -491,7 +493,7 @@ class PermissionController {
         SELECT 
           bm.can_view, bm.can_create_cards, bm.can_edit_cards, bm.can_move_cards,
           bm.can_delete_cards, bm.can_manage_labels, bm.can_add_members,
-          bm.can_remove_members, bm.can_edit_board,
+          bm.can_remove_members, bm.can_edit_board, bm.can_delete_board,
           (b.owner_id = bm.user_id) as is_owner,
           b.name as board_name
         FROM board_members bm
@@ -520,7 +522,8 @@ class PermissionController {
           can_manage_labels: permissions.can_manage_labels,
           can_add_members: permissions.can_add_members,
           can_remove_members: permissions.can_remove_members,
-          can_edit_board: permissions.can_edit_board
+          can_edit_board: permissions.can_edit_board,
+          can_delete_board: permissions.can_delete_board || permissions.is_owner
         }
       });
 

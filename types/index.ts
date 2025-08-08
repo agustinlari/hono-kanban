@@ -95,5 +95,6 @@ export enum PermissionAction {
   MANAGE_LABELS = 'can_manage_labels',
   ADD_MEMBERS = 'can_add_members',
   REMOVE_MEMBERS = 'can_remove_members',
-  EDIT_BOARD = 'can_edit_board'
+  EDIT_BOARD = 'can_edit_board',
+  DELETE_BOARD = 'can_delete_board'
 }

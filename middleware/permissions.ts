@@ -18,7 +18,7 @@ export class PermissionService {
       SELECT 
         can_view, can_create_cards, can_edit_cards, can_move_cards,
         can_delete_cards, can_manage_labels, can_add_members, 
-        can_remove_members, can_edit_board
+        can_remove_members, can_edit_board, can_delete_board
       FROM board_members 
       WHERE user_id = $1 AND board_id = $2
     `;
