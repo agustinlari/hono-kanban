@@ -4,12 +4,16 @@ import { validateKeycloakToken, type KeycloakUser } from '../helpers/keycloak.he
 import { pool } from '../config/database';
 
 export interface AppUser {
+  id: number;          // ID interno de nuestra app (frontend espera este campo)
   keycloakId: string;  // UUID de Keycloak
-  userId: number;      // ID interno de nuestra app
+  userId: number;      // ID interno de nuestra app (para compatibilidad)
   email: string;
   name?: string;
+  isAdmin?: boolean;   // Frontend espera este campo
   rol: 'admin' | 'user';
   keycloakRoles: string[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
