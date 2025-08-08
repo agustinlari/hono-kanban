@@ -205,7 +205,21 @@ class KeycloakAuthController {
       console.log('🎯 [LoginController] Petición recibida');
       console.log('🎯 [LoginController] Headers:', Object.fromEntries(c.req.raw.headers.entries()));
       
-      const { username, password } = await c.req.json();
+      // Detectar tipo de contenido y parsear correctamente
+      const contentType = c.req.header('Content-Type') || '';
+      let username: string, password: string;
+      
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json();
+        username = body.username;
+        password = body.password;
+      } else {
+        // Asumir form-urlencoded como fallback
+        const body = await c.req.formData();
+        username = body.get('username') as string;
+        password = body.get('password') as string;
+      }
+      
       console.log('🎯 [LoginController] Username recibido:', username);
 
       if (!username || !password) {
