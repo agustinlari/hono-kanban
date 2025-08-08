@@ -36,6 +36,7 @@ export interface BoardPermissions {
   can_add_members: boolean;
   can_remove_members: boolean;
   can_edit_board: boolean;
+  can_delete_board: boolean;
 }
 
 export interface BoardMember extends BoardPermissions {
