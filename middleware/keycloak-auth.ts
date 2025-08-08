@@ -70,12 +70,16 @@ async function getOrCreateUser(keycloakUser: KeycloakUser): Promise<AppUser> {
       }
 
       return {
+        id: existingUser.id, // Frontend espera 'id', no 'userId'
         keycloakId: keycloakUser.sub,
         userId: existingUser.id,
         email: keycloakUser.email,
         name: newName,
+        isAdmin: existingUser.rol === 'admin', // Frontend espera 'isAdmin'
         rol: existingUser.rol,
-        keycloakRoles: keycloakUser.realm_access?.roles || []
+        keycloakRoles: keycloakUser.realm_access?.roles || [],
+        created_at: existingUser.created_at,
+        updated_at: existingUser.updated_at
       };
     } else {
       // Usuario no existe, crearlo
@@ -95,12 +99,16 @@ async function getOrCreateUser(keycloakUser: KeycloakUser): Promise<AppUser> {
       const newUser = insertResult.rows[0];
 
       return {
+        id: newUser.id, // Frontend espera 'id', no 'userId'
         keycloakId: keycloakUser.sub,
         userId: newUser.id,
         email: keycloakUser.email,
         name: newName,
+        isAdmin: newUser.rol === 'admin', // Frontend espera 'isAdmin'
         rol: newUser.rol,
-        keycloakRoles: keycloakUser.realm_access?.roles || []
+        keycloakRoles: keycloakUser.realm_access?.roles || [],
+        created_at: newUser.created_at,
+        updated_at: newUser.updated_at
       };
     }
   } finally {
