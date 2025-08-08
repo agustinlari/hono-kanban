@@ -182,12 +182,45 @@ class BoardService {
    */
   static async createBoard(data: CreateBoardPayload, ownerId: number): Promise<Board> {
       const { name, description = null } = data;
+      
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      const query = `
-        INSERT INTO boards (name, description, owner_id) 
-        VALUES ($1, $2, $3) RETURNING *`;
-      const result = await pool.query(query, [name, description, ownerId]);
-      return result.rows[0];
+        // 1. Crear el tablero
+        const boardQuery = `
+          INSERT INTO boards (name, description, owner_id) 
+          VALUES ($1, $2, $3) RETURNING *`;
+        const boardResult = await client.query(boardQuery, [name, description, ownerId]);
+        const newBoard = boardResult.rows[0];
+
+        // 2. Añadir al owner como miembro con permisos completos
+        const memberQuery = `
+          INSERT INTO board_members (
+            board_id, user_id, invited_by,
+            can_view, can_create_cards, can_edit_cards, can_move_cards,
+            can_delete_cards, can_manage_labels, can_add_members,
+            can_remove_members, can_edit_board, can_delete_board
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`;
+        
+        await client.query(memberQuery, [
+          newBoard.id, ownerId, ownerId, // invited_by es el mismo owner
+          true, true, true, true, // can_view, can_create_cards, can_edit_cards, can_move_cards
+          true, true, true, true, // can_delete_cards, can_manage_labels, can_add_members, can_remove_members
+          true, true // can_edit_board, can_delete_board
+        ]);
+
+        await client.query('COMMIT');
+        console.log(`✅ Tablero creado y owner añadido como miembro: ${newBoard.name} (ID: ${newBoard.id})`);
+        return newBoard;
+
+      } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('❌ Error creando tablero:', error);
+        throw error;
+      } finally {
+        client.release();
+      }
   }
 
   /**
