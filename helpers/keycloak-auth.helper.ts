@@ -26,17 +26,21 @@ class KeycloakAuthService {
       console.log('🆔 [KeycloakAuth] Client ID:', KEYCLOAK_CLIENT_ID);
       
       // 1. Obtener token de Keycloak
+      const requestBody = new URLSearchParams({
+        grant_type: 'password',
+        client_id: KEYCLOAK_CLIENT_ID,
+        username,
+        password,
+      });
+
+      console.log('📡 [KeycloakAuth] Body a enviar:', requestBody.toString());
+
       const response = await fetch(KEYCLOAK_TOKEN_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({
-          grant_type: 'password',
-          client_id: KEYCLOAK_CLIENT_ID,
-          username,
-          password,
-        }),
+        body: requestBody,
       });
 
       console.log('📡 [KeycloakAuth] Respuesta Keycloak status:', response.status);
@@ -65,7 +69,15 @@ class KeycloakAuthService {
       };
 
     } catch (error: any) {
-      console.error('Error en login con Keycloak:', error);
+      console.error('❌ [KeycloakAuth] Error completo:', error);
+      console.error('❌ [KeycloakAuth] Error name:', error.name);
+      console.error('❌ [KeycloakAuth] Error message:', error.message);
+      console.error('❌ [KeycloakAuth] Error cause:', error.cause);
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new Error('No se puede conectar con Keycloak - Verificar conectividad de red');
+      }
+      
       throw new Error(error.message || 'Error de autenticación');
     }
   }
