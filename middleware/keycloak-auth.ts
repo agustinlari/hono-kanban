@@ -59,11 +59,13 @@ async function getOrCreateUser(keycloakUser: KeycloakUser): Promise<AppUser> {
       // Usuario existe, actualizar información si es necesario
       const existingUser = userResult.rows[0];
       
-      // Actualizar email si cambió
-      if (existingUser.email !== keycloakUser.email) {
+      // Actualizar email y nombre si cambiaron
+      const newName = keycloakUser.name || keycloakUser.preferred_username || keycloakUser.email;
+      
+      if (existingUser.email !== keycloakUser.email || existingUser.name !== newName) {
         await client.query(
-          'UPDATE usuarios SET email = $1, updated_at = NOW() WHERE keycloak_id = $2',
-          [keycloakUser.email, keycloakUser.sub]
+          'UPDATE usuarios SET email = $1, name = $2, updated_at = NOW() WHERE keycloak_id = $3',
+          [keycloakUser.email, newName, keycloakUser.sub]
         );
       }
 
@@ -71,19 +73,22 @@ async function getOrCreateUser(keycloakUser: KeycloakUser): Promise<AppUser> {
         keycloakId: keycloakUser.sub,
         userId: existingUser.id,
         email: keycloakUser.email,
-        name: keycloakUser.name || keycloakUser.preferred_username,
+        name: newName,
         rol: existingUser.rol,
         keycloakRoles: keycloakUser.realm_access?.roles || []
       };
     } else {
       // Usuario no existe, crearlo
+      const newName = keycloakUser.name || keycloakUser.preferred_username || keycloakUser.email;
+      
       const insertResult = await client.query(`
-        INSERT INTO usuarios (keycloak_id, email, rol) 
-        VALUES ($1, $2, $3) 
+        INSERT INTO usuarios (keycloak_id, email, name, rol) 
+        VALUES ($1, $2, $3, $4) 
         RETURNING *
       `, [
         keycloakUser.sub,
         keycloakUser.email,
+        newName,
         'user' // Rol por defecto
       ]);
 
@@ -93,7 +98,7 @@ async function getOrCreateUser(keycloakUser: KeycloakUser): Promise<AppUser> {
         keycloakId: keycloakUser.sub,
         userId: newUser.id,
         email: keycloakUser.email,
-        name: keycloakUser.name || keycloakUser.preferred_username,
+        name: newName,
         rol: newUser.rol,
         keycloakRoles: keycloakUser.realm_access?.roles || []
       };
