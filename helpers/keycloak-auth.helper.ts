@@ -302,6 +302,7 @@ export const keycloakAuthRoutes = new Hono<{ Variables: Variables }>();
 // Debug middleware para keycloak routes
 keycloakAuthRoutes.use('*', (c, next) => {
   console.log('🔐 [KeycloakRoutes] Petición:', c.req.method, c.req.url);
+  console.log('🔐 [KeycloakRoutes] Headers:', Object.fromEntries(c.req.raw.headers.entries()));
   return next();
 });
 

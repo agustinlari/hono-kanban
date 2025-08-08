@@ -51,6 +51,9 @@ routes.use('*', (c, next) => {
   console.log('📋 [Routes] Origin:', c.req.header('Origin'));
   return next();
 });
+
+// IMPORTANTE: keycloakAuthRoutes PRIMERO para evitar conflictos de rutas
+routes.route('/', keycloakAuthRoutes);
 routes.route('/', authRoutes);
 routes.route('/', archivoRoutes);
 routes.route('/', boardRoutes);
@@ -59,4 +62,3 @@ routes.route('/', cardRoutes);
 routes.route('/', labelRoutes);
 routes.route('/', permissionRoutes);
 routes.route('/', assignmentRoutes);
-routes.route('/', keycloakAuthRoutes);
