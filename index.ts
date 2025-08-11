@@ -15,10 +15,21 @@ console.log("Iniciando script index.ts...");
 const app = new Hono<{ Variables: Variables }>();
 console.log("Instancia de Hono creada.");
 
-// CORS deshabilitado - Se maneja en nginx
-// app.use('/public/*', cors({...}));
-// app.use('*', cors({...}));
-console.log("CORS deshabilitado - Se maneja en nginx.");
+// CORS habilitado solo para endpoints de autenticación (para login estático)
+app.use('/api/kanban/auth/keycloak/*', cors({
+  origin: ['http://localhost:5173', 'http://localhost:4173', 'https://aplicaciones.osmos.es'],
+  credentials: false,
+  exposeHeaders: ['*'],
+  maxAge: 86400,
+}));
+
+// Test endpoint CORS
+app.use('/api/kanban/test-cors', cors({
+  origin: ['http://localhost:5173', 'http://localhost:4173', 'https://aplicaciones.osmos.es'],
+  credentials: false,
+}));
+
+console.log("CORS habilitado para endpoints de autenticación.");
 
 //Montar todas las rutas
 app.route('/', routes);
