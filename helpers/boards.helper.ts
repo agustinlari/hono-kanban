@@ -404,3 +404,5 @@ boardRoutes.get('/boards/:id', requireBoardAccess(), BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);
 boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
 boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);
+
+export { BoardController };

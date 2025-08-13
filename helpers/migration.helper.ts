@@ -120,7 +120,7 @@ class MigrationService {
         columns: columnsResult.rows,
         indexes: indexResult.rows,
         user_stats: usersResult.rows[0],
-        migration_completed: columnsResult.rows.some(row => row.column_name === 'keycloak_id')
+        migration_completed: columnsResult.rows.some((row: any) => row.column_name === 'keycloak_id')
       };
     } finally {
       client.release();

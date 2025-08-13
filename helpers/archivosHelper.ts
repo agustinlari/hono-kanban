@@ -403,7 +403,7 @@ class ArchivoService {
     `;
     
     const result = await pool.query(query, [cardId]);
-    return result.rows.map(row => ({
+    return result.rows.map((row: any) => ({
       ...row,
       attachment_created_at: row.attachment_created_at
     }));
@@ -426,7 +426,7 @@ class ArchivoService {
     const estado = {
       tarjeta: cardResult.rows[0] || null,
       attachments: attachmentsResult.rows,
-      thumbnails: attachmentsResult.rows.filter(a => a.is_thumbnail)
+      thumbnails: attachmentsResult.rows.filter((a: any) => a.is_thumbnail)
     };
     
     console.log('Estado de la tarjeta:', JSON.stringify(estado, null, 2));
