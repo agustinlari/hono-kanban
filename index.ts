@@ -15,8 +15,8 @@ console.log("Iniciando script index.ts...");
 const app = new Hono<{ Variables: Variables }>();
 console.log("Instancia de Hono creada.");
 
-// CORS habilitado para todos los endpoints de la API
-app.use('/api/kanban/*', cors({
+// CORS habilitado para todos los endpoints (nginx ya maneja /api/kanban)
+app.use('/*', cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://aplicaciones.osmos.es'],
   credentials: false,
   exposeHeaders: ['*'],
@@ -27,8 +27,8 @@ app.use('/api/kanban/*', cors({
 
 console.log("CORS habilitado para endpoints de autenticación.");
 
-//Montar todas las rutas con prefijo /api/kanban
-app.route('/api/kanban', routes);
+//Montar todas las rutas directamente (nginx ya elimina /api/kanban)
+app.route('/', routes);
 console.log(`Configurando para el puerto: ${PORT}`);
 console.log("A punto de llamar a serve()...");
 

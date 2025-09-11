@@ -21,19 +21,20 @@ class KeycloakAuthService {
    */
   static async login(username: string, password: string) {
     try {
-      console.log('🔐 [KeycloakAuth] Iniciando login para:', username);
-      console.log('🔗 [KeycloakAuth] URL:', KEYCLOAK_TOKEN_URL);
-      console.log('🆔 [KeycloakAuth] Client ID:', KEYCLOAK_CLIENT_ID);
+      console.log('🔐 Iniciando login para:', username);
+      console.log('🔗 URL interna:', KEYCLOAK_BASE_URL);
+      console.log('🆔 Client ID:', KEYCLOAK_CLIENT_ID);
+      console.log('🌐 Realm:', KEYCLOAK_REALM);
       
-      // 1. Obtener token de Keycloak
+      // Obtener token de Keycloak usando URL interna
       const requestBody = new URLSearchParams({
         grant_type: 'password',
         client_id: KEYCLOAK_CLIENT_ID,
-        username,
-        password,
+        username: username,
+        password: password,
       });
 
-      console.log('📡 [KeycloakAuth] Body a enviar:', requestBody.toString());
+      console.log('📡 URL completa:', KEYCLOAK_TOKEN_URL);
 
       const response = await fetch(KEYCLOAK_TOKEN_URL, {
         method: 'POST',
@@ -43,41 +44,30 @@ class KeycloakAuthService {
         body: requestBody,
       });
 
-      console.log('📡 [KeycloakAuth] Respuesta Keycloak status:', response.status);
+      console.log('📡 Status de respuesta:', response.status);
 
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error('❌ [KeycloakAuth] Error de Keycloak:', errorData);
+        const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Error de Keycloak:', errorData);
         throw new Error(errorData.error_description || 'Credenciales inválidas');
       }
 
       const tokenData = await response.json();
 
-      // 2. Validar y decodificar el token
+      // Validar y decodificar el token
       const keycloakUser = await validateKeycloakToken(tokenData.access_token);
-
-      // 3. Crear o actualizar usuario en nuestra base de datos
-      const appUser = await this.getOrCreateUser(keycloakUser);
 
       return {
         success: true,
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
         expires_in: tokenData.expires_in,
-        user: appUser,
+        user: await this.getOrCreateUser(keycloakUser),
         keycloak_user: keycloakUser
       };
 
     } catch (error: any) {
-      console.error('❌ [KeycloakAuth] Error completo:', error);
-      console.error('❌ [KeycloakAuth] Error name:', error.name);
-      console.error('❌ [KeycloakAuth] Error message:', error.message);
-      console.error('❌ [KeycloakAuth] Error cause:', error.cause);
-      
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new Error('No se puede conectar con Keycloak - Verificar conectividad de red');
-      }
-      
+      console.error('❌ Error completo:', error);
       throw new Error(error.message || 'Error de autenticación');
     }
   }
@@ -215,40 +205,36 @@ class KeycloakAuthController {
   static async login(c: Context) {
     try {
       console.log('🎯 [LoginController] Petición recibida');
-      console.log('🎯 [LoginController] Headers:', Object.fromEntries(c.req.raw.headers.entries()));
+      console.log('🎯 [LoginController] URL:', c.req.url);
+      console.log('🎯 [LoginController] Method:', c.req.method);
       
-      // Detectar tipo de contenido y parsear correctamente
-      const contentType = c.req.header('Content-Type') || '';
-      let username: string, password: string;
-      
-      if (contentType.includes('application/json')) {
-        const body = await c.req.json();
-        username = body.username;
-        password = body.password;
-      } else {
-        // Asumir form-urlencoded como fallback
-        const body = await c.req.formData();
-        username = body.get('username') as string;
-        password = body.get('password') as string;
-      }
+      const { username, password } = await c.req.json();
       
       console.log('🎯 [LoginController] Username recibido:', username);
 
       if (!username || !password) {
         return c.json({ 
-          error: 'Username y password son requeridos' 
+          error: 'Username and password are required' 
         }, 400);
       }
 
       const result = await KeycloakAuthService.login(username, password);
 
       return c.json({
-        message: 'Autenticación exitosa',
-        ...result
+        success: true,
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        expires_in: result.expires_in,
+        user: {
+          sub: result.keycloak_user.sub,
+          email: result.keycloak_user.email,
+          name: result.keycloak_user.name || result.keycloak_user.preferred_username,
+          preferred_username: result.keycloak_user.preferred_username
+        }
       });
 
     } catch (error: any) {
-      console.error('Error en login controller:', error);
+      console.error('❌ Error en login controller:', error);
       return c.json({ 
         error: error.message || 'Error de autenticación' 
       }, 401);
