@@ -171,7 +171,39 @@ class CardService {
       }
 
       await client.query('COMMIT');
-      return updatedCard;
+      
+      // Después de actualizar, obtener la tarjeta completa con asignaciones
+      const fullCardQuery = `
+        SELECT c.*,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'id', ca.id,
+                     'user_id', ca.user_id,
+                     'card_id', ca.card_id,
+                     'user_email', u.email,
+                     'user_name', COALESCE(u.email, 'Usuario'),
+                     'assigned_by', ca.assigned_by,
+                     'assigned_at', ca.assigned_at
+                   )
+                 ) FILTER (WHERE ca.id IS NOT NULL), '[]'
+               ) AS assignees
+        FROM cards c
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        LEFT JOIN usuarios u ON ca.user_id = u.id
+        WHERE c.id = $1
+        GROUP BY c.id
+      `;
+      
+      const fullCardResult = await client.query(fullCardQuery, [id]);
+      if (fullCardResult.rowCount === 0) {
+        return updatedCard; // Fallback a la tarjeta básica si no se encuentra
+      }
+      
+      const fullCard = fullCardResult.rows[0];
+      fullCard.assignees = fullCard.assignees || [];
+      
+      return fullCard;
 
     } catch (error) {
       await client.query('ROLLBACK');

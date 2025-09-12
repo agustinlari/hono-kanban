@@ -532,6 +532,44 @@ class PermissionController {
       return c.json({ error: 'Error al obtener los permisos del usuario' }, 500);
     }
   }
+
+  /**
+   * Obtiene todos los usuarios disponibles para asignación
+   */
+  static async getAllUsers(c: Context) {
+    try {
+      console.log('📋 [PermissionController.getAllUsers] Obteniendo todos los usuarios');
+      
+      const query = `
+        SELECT 
+          id,
+          email,
+          COALESCE(email, 'Usuario') as name,
+          rol,
+          created_at
+        FROM usuarios 
+        ORDER BY email ASC
+      `;
+      
+      const result = await pool.query(query);
+      
+      const users = result.rows.map(row => ({
+        user_id: row.id,
+        user_email: row.email,
+        user_name: row.name,
+        user_role: row.rol,
+        created_at: row.created_at
+      }));
+      
+      console.log(`✅ [PermissionController.getAllUsers] Encontrados ${users.length} usuarios`);
+      
+      return c.json(users);
+
+    } catch (error: any) {
+      console.error('Error en PermissionController.getAllUsers:', error);
+      return c.json({ error: 'Error al obtener los usuarios' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -551,6 +589,7 @@ permissionRoutes.delete('/boards/:boardId/members/:userId', requirePermission(Pe
 permissionRoutes.get('/permission-roles', PermissionController.getPermissionRoles);
 permissionRoutes.get('/user/me', PermissionController.getMe);
 permissionRoutes.get('/user/boards', PermissionController.getUserBoards);
+permissionRoutes.get('/users', PermissionController.getAllUsers);
 permissionRoutes.get('/boards/:boardId/my-permissions', PermissionController.getMyPermissions);
 
 // Ruta para que admins obtengan todos los tableros
