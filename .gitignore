@@ -1,6 +1,7 @@
 node_modules/
 backups/
 uploads_data/
+cvi_downloader/
 config/database.ts
 config/env.ts
 .DS_Store

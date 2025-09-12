@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@hono/node-server": "^1.17.1",
+    "chromedriver": "^140.0.1",
     "dotenv": "^16.5.0",
     "hono": "^4.7.11",
     "jsonwebtoken": "^9.0.2",
