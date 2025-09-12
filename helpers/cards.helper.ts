@@ -172,10 +172,14 @@ class CardService {
 
       await client.query('COMMIT');
       
-      // Después de actualizar, obtener la tarjeta completa con asignaciones
+      // Después de actualizar, obtener la tarjeta completa con asignaciones y etiquetas
       const fullCardQuery = `
         SELECT c.*,
-               COALESCE(
+               COALESCE(assignees_agg.assignees, '[]') AS assignees,
+               COALESCE(labels_agg.labels, '[]') AS labels
+        FROM cards c
+        LEFT JOIN (
+          SELECT ca.card_id,
                  json_agg(
                    json_build_object(
                      'id', ca.id,
@@ -186,13 +190,28 @@ class CardService {
                      'assigned_by', ca.assigned_by,
                      'assigned_at', ca.assigned_at
                    )
-                 ) FILTER (WHERE ca.id IS NOT NULL), '[]'
-               ) AS assignees
-        FROM cards c
-        LEFT JOIN card_assignments ca ON c.id = ca.card_id
-        LEFT JOIN usuarios u ON ca.user_id = u.id
+                 ) AS assignees
+          FROM card_assignments ca
+          JOIN usuarios u ON ca.user_id = u.id
+          WHERE ca.card_id = $1
+          GROUP BY ca.card_id
+        ) assignees_agg ON c.id = assignees_agg.card_id
+        LEFT JOIN (
+          SELECT cl.card_id,
+                 json_agg(
+                   json_build_object(
+                     'id', l.id,
+                     'name', l.name,
+                     'color', l.color,
+                     'board_id', l.board_id
+                   )
+                 ) AS labels
+          FROM card_labels cl
+          JOIN labels l ON cl.label_id = l.id
+          WHERE cl.card_id = $1
+          GROUP BY cl.card_id
+        ) labels_agg ON c.id = labels_agg.card_id
         WHERE c.id = $1
-        GROUP BY c.id
       `;
       
       const fullCardResult = await client.query(fullCardQuery, [id]);
@@ -202,6 +221,7 @@ class CardService {
       
       const fullCard = fullCardResult.rows[0];
       fullCard.assignees = fullCard.assignees || [];
+      fullCard.labels = fullCard.labels || [];
       
       return fullCard;
 
