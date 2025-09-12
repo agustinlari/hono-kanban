@@ -19,18 +19,78 @@ class BoardPermissionService {
     console.log(`🔍 [BoardPermissionService.getBoardMembers] Buscando miembros para tablero ID: ${boardId}`);
     
     const query = `
-      SELECT 
-        bm.*,
-        u.email as user_email,
-        (b.owner_id = bm.user_id) as is_owner
-      FROM board_members bm
-      INNER JOIN usuarios u ON bm.user_id = u.id
-      INNER JOIN boards b ON bm.board_id = b.id
-      WHERE bm.board_id = $1
-      ORDER BY is_owner DESC, bm.joined_at ASC
+      WITH board_members_extended AS (
+        -- Miembros explícitos del tablero
+        SELECT DISTINCT
+          bm.id,
+          bm.board_id,
+          bm.user_id,
+          bm.invited_by,
+          bm.can_view,
+          bm.can_create_cards,
+          bm.can_edit_cards,
+          bm.can_delete_cards,
+          bm.can_move_cards,
+          bm.can_manage_labels,
+          bm.can_add_members,
+          bm.can_remove_members,
+          bm.can_edit_board,
+          bm.can_delete_board,
+          bm.joined_at,
+          bm.updated_at,
+          u.email as user_email,
+          u.email as user_name,
+          (b.owner_id = bm.user_id) as is_owner,
+          'explicit'::text as member_type
+        FROM board_members bm
+        INNER JOIN usuarios u ON bm.user_id = u.id
+        INNER JOIN boards b ON bm.board_id = b.id
+        WHERE bm.board_id = $1
+        
+        UNION
+        
+        -- Usuarios con tarjetas asignadas (que no sean miembros explícitos)
+        SELECT DISTINCT
+          NULL::integer as id,
+          $1::integer as board_id,
+          u.id as user_id,
+          NULL::integer as invited_by,
+          true as can_view,
+          false as can_create_cards,
+          false as can_edit_cards,
+          false as can_delete_cards,
+          false as can_move_cards,
+          false as can_manage_labels,
+          false as can_add_members,
+          false as can_remove_members,
+          false as can_edit_board,
+          false as can_delete_board,
+          MIN(ca.assigned_at) as joined_at,
+          NOW() as updated_at,
+          u.email as user_email,
+          u.email as user_name,
+          false as is_owner,
+          'assigned'::text as member_type
+        FROM card_assignments ca
+        INNER JOIN cards c ON ca.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN usuarios u ON ca.user_id = u.id
+        WHERE l.board_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM board_members bm 
+          WHERE bm.board_id = $1 AND bm.user_id = u.id
+        )
+        GROUP BY u.id, u.email
+      )
+      SELECT * FROM board_members_extended
+      ORDER BY is_owner DESC, member_type ASC, joined_at ASC
     `;
     const result = await pool.query(query, [boardId]);
-    console.log(`📊 [BoardPermissionService.getBoardMembers] Encontrados ${result.rows.length} miembros para tablero ${boardId}:`, result.rows.map((r: any) => ({ board_id: r.board_id, user_email: r.user_email })));
+    console.log(`📊 [BoardPermissionService.getBoardMembers] Encontrados ${result.rows.length} miembros para tablero ${boardId} (explícitos + con asignaciones):`, result.rows.map((r: any) => ({ 
+      user_email: r.user_email, 
+      member_type: r.member_type,
+      is_owner: r.is_owner
+    })));
     return result.rows;
   }
 
