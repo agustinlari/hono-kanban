@@ -139,9 +139,8 @@ class ArchivoService {
 
         // Si es un thumbnail, actualizar el image_url de la tarjeta
         if (isThumbnail) {
-          // Usar la ruta estática pública que será servida por nginx
-          const uploadsFolderName = path.basename(UPLOADS_DIR);
-          const imageUrl = `/public/${uploadsFolderName}/${nuevoArchivo.nombre_guardado}`;
+          // Usar la ruta configurada en nginx para kanban uploads
+          const imageUrl = `/public/kanban-uploads/${nuevoArchivo.nombre_guardado}`;
           console.log(`Actualizando image_url de tarjeta ${cardId} con URL: ${imageUrl}`);
           
           const updateResult = await client.query(
@@ -457,7 +456,7 @@ class ArchivoService {
 
       for (const row of result.rows) {
         try {
-          const nuevaUrl = `/public/${uploadsFolderName}/${row.nombre_guardado}`;
+          const nuevaUrl = `/public/kanban-uploads/${row.nombre_guardado}`;
           
           await client.query(
             'UPDATE cards SET image_url = $1 WHERE id = $2',
