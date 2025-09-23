@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@hono/node-server": "^1.17.1",
+    "@types/xlsx": "^0.0.35",
     "chromedriver": "^140.0.1",
     "dotenv": "^16.5.0",
     "hono": "^4.7.11",
@@ -20,7 +21,8 @@
     "jwks-rsa": "^3.1.0",
     "papaparse": "^5.5.3",
     "pg": "^8.16.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
