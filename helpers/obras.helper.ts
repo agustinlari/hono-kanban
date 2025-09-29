@@ -204,13 +204,14 @@ class ObrasService {
     
     try {
       await client.query('BEGIN');
-      
+
       // Buscar si el proyecto ya existe por cod_integracion
       const existingQuery = 'SELECT * FROM proyectos_inmobiliarios WHERE cod_integracion = $1';
       const existing = await client.query(existingQuery, [data.cod_integracion]);
-      
+
       let isUpdate = false;
       let projectId: number;
+      let actionResult: any;
       
       if (existing.rows.length > 0) {
         // Actualizar registro existente
@@ -303,22 +304,28 @@ class ObrasService {
           
           await client.query(updateQuery, values);
           
-          // Registrar cambios en el historial
-          for (const change of changes) {
-            const historialQuery = `
-              INSERT INTO proyectos_historial (proyecto_id, usuario_id, tipo_accion, campo_modificado, valor_anterior, valor_nuevo)
-              VALUES ($1, $2, $3, $4, $5, $6)
-            `;
-            await client.query(historialQuery, [
-              projectId, userId, 'UPDATE', change.campo, change.valorAnterior, change.valorNuevo
-            ]);
+          // Registrar cambios en el historial (opcional - no debe fallar la transacción principal)
+          try {
+            for (const change of changes) {
+              const historialQuery = `
+                INSERT INTO proyectos_historial (proyecto_id, usuario_id, tipo_accion, campo_modificado, valor_anterior, valor_nuevo)
+                VALUES ($1, $2, $3, $4, $5, $6)
+              `;
+              await client.query(historialQuery, [
+                projectId, userId, 'UPDATE', change.campo, change.valorAnterior, change.valorNuevo
+              ]);
+            }
+            console.log(`📝 [OBRAS] Historial de cambios registrado para proyecto: ${projectId}`);
+          } catch (historialError) {
+            console.warn(`⚠️ [OBRAS] Error registrando historial de cambios (no crítico): ${historialError.message}`);
+            // No relanzar el error - el UPDATE principal debe completarse
           }
-          
+
           console.log(`📝 [OBRAS] Proyecto actualizado: ${data.cod_integracion} (${changes.length} cambios)`);
-          return { action: 'updated', projectId, changes: changes.length };
+          actionResult = { action: 'updated', projectId, changes: changes.length };
         } else {
           console.log(`📝 [OBRAS] Proyecto sin cambios: ${data.cod_integracion}`);
-          return { action: 'no_changes', projectId, changes: 0 };
+          actionResult = { action: 'no_changes', projectId, changes: 0 };
         }
         
       } else {
@@ -410,12 +417,12 @@ class ObrasService {
           
           // Grupo 9: mobiliario (3 valores)
           this.excelDateToPostgres(data.aprob_mobiliario_prevista),
-          this.excelDateToPostgres(data.aprob_mobiliario_real), 
-          this.excelDateToPostgres(data.ent_mobiliario_prevista), 
-          
+          this.excelDateToPostgres(data.aprob_mobiliario_real),
+          this.excelDateToPostgres(data.ent_mobiliario_prevista),
+
           // Grupo 10: mercancía y espacio (3 valores)
-          this.excelDateToPostgres(data.ent_mobiliario_real), 
-          this.excelDateToPostgres(data.ent_mercancia_prevista), 
+          this.excelDateToPostgres(data.ent_mobiliario_real),
+          this.excelDateToPostgres(data.ent_mercancia_prevista),
           this.excelDateToPostgres(data.ent_mercancia_real),
           
           // Grupo 11: final (4 valores)
@@ -448,20 +455,26 @@ class ObrasService {
         projectId = result.rows[0].id;
         console.log(`💾 [OBRAS] INSERT exitoso - ID generado: ${projectId} para cod_integracion: ${data.cod_integracion}`);
         
-        // Registrar creación en el historial
-        const historialQuery = `
-          INSERT INTO proyectos_historial (proyecto_id, usuario_id, tipo_accion)
-          VALUES ($1, $2, $3)
-        `;
-        await client.query(historialQuery, [projectId, userId, 'CREATE']);
-        
+        // Registrar creación en el historial (opcional - no debe fallar la transacción principal)
+        try {
+          const historialQuery = `
+            INSERT INTO proyectos_historial (proyecto_id, usuario_id, tipo_accion)
+            VALUES ($1, $2, $3)
+          `;
+          await client.query(historialQuery, [projectId, userId, 'CREATE']);
+          console.log(`📝 [OBRAS] Historial registrado para proyecto: ${projectId}`);
+        } catch (historialError) {
+          console.warn(`⚠️ [OBRAS] Error registrando historial (no crítico): ${historialError.message}`);
+          // No relanzar el error - el INSERT principal debe completarse
+        }
+
         console.log(`✨ [OBRAS] Proyecto creado: ${data.cod_integracion}`);
-        return { action: 'created', projectId, changes: 1 };
+        actionResult = { action: 'created', projectId, changes: 1 };
       }
-      
+
       await client.query('COMMIT');
-      console.log(`✅ [OBRAS] TRANSACCIÓN CONFIRMADA - Proyecto ${isUpdate ? 'actualizado' : 'creado'}: ${data.cod_integracion} (ID: ${projectId})`);
-      return { action: isUpdate ? 'updated' : 'created', projectId, changes: isUpdate ? 1 : 1 };
+      console.log(`✅ [OBRAS] TRANSACCIÓN CONFIRMADA - Proyecto ${actionResult.action}: ${data.cod_integracion} (ID: ${projectId})`);
+      return actionResult;
       
     } catch (error) {
       await client.query('ROLLBACK');
