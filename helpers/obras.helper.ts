@@ -16,6 +16,53 @@ import path from 'path';
 // ================================
 class ObrasService {
   /**
+   * Ejecuta el scraper C# para descargar un nuevo archivo Excel
+   */
+  static async downloadNewExcelFile(): Promise<{ success: boolean; message: string; fileName?: string }> {
+    const { exec } = require('child_process');
+    const scraperPath = '/home/osmos/proyectos/svelte-trello/hono-kanban/cvi_downloader';
+
+    try {
+      console.log(`📥 [OBRAS] Iniciando descarga de nuevo Excel...`);
+
+      return new Promise((resolve) => {
+        exec('./Scrapping', { cwd: scraperPath, timeout: 120000 }, (error, stdout, stderr) => {
+          if (error) {
+            console.error(`❌ [OBRAS] Error ejecutando scraper:`, error.message);
+            resolve({
+              success: false,
+              message: `Error ejecutando el scraper: ${error.message}`
+            });
+            return;
+          }
+
+          if (stderr) {
+            console.warn(`⚠️ [OBRAS] Advertencias del scraper:`, stderr);
+          }
+
+          console.log(`✅ [OBRAS] Scraper ejecutado exitosamente`);
+          console.log(`📊 [OBRAS] Output:`, stdout);
+
+          // Extraer nombre del archivo del output
+          const fileNameMatch = stdout.match(/¡Archivo descargado!: (.+)/);
+          const fileName = fileNameMatch ? fileNameMatch[1] : 'archivo_descargado.xlsx';
+
+          resolve({
+            success: true,
+            message: 'Excel descargado exitosamente',
+            fileName
+          });
+        });
+      });
+    } catch (error) {
+      console.error(`❌ [OBRAS] Error inesperado:`, error);
+      return {
+        success: false,
+        message: `Error inesperado: ${error.message}`
+      };
+    }
+  }
+  /**
    * Lee el archivo Excel más reciente de la carpeta de descargas
    */
   static async getLatestExcelFile(): Promise<string | null> {
@@ -40,7 +87,22 @@ class ObrasService {
       
       // Ordenar por fecha de modificación (más reciente primero)
       filesWithStats.sort((a, b) => b.modified.getTime() - a.modified.getTime());
-      
+
+      // Limpiar archivos antiguos - mantener solo los 3 más recientes
+      if (filesWithStats.length > 3) {
+        const filesToDelete = filesWithStats.slice(3); // Archivos del 4° en adelante
+        console.log(`🧹 [OBRAS] Limpiando ${filesToDelete.length} archivos Excel antiguos`);
+
+        for (const fileToDelete of filesToDelete) {
+          try {
+            await fs.unlink(fileToDelete.path);
+            console.log(`🗑️ [OBRAS] Archivo eliminado: ${fileToDelete.file}`);
+          } catch (deleteError) {
+            console.warn(`⚠️ [OBRAS] Error eliminando archivo ${fileToDelete.file}:`, deleteError.message);
+          }
+        }
+      }
+
       return filesWithStats[0].path;
     } catch (error) {
       console.error('Error leyendo directorio Excel:', error);
@@ -111,12 +173,16 @@ class ObrasService {
    */
   static excelDateToPostgres(excelDate: any): string | null {
     if (!excelDate || excelDate === '') return null;
-    
+
     // Si ya es una fecha
     if (excelDate instanceof Date) {
-      return excelDate.toISOString().split('T')[0];
+      // Usar fecha local en lugar de UTC para evitar problemas de zona horaria
+      const year = excelDate.getFullYear();
+      const month = String(excelDate.getMonth() + 1).padStart(2, '0');
+      const day = String(excelDate.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
-    
+
     // Si es un número de Excel (días desde 1900-01-01)
     if (typeof excelDate === 'number') {
       const date = XLSX.SSF.parse_date_code(excelDate);
@@ -124,15 +190,19 @@ class ObrasService {
         return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
       }
     }
-    
+
     // Si es string, intentar parsearlo
     if (typeof excelDate === 'string') {
       const parsed = new Date(excelDate);
       if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString().split('T')[0];
+        // Usar fecha local en lugar de UTC
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       }
     }
-    
+
     return null;
   }
 
@@ -151,8 +221,11 @@ class ObrasService {
     if (typeof value === 'string') {
       // Limpiar espacios y caracteres no numéricos básicos
       const cleaned = value.trim();
-      if (cleaned === '' || cleaned === 'N/A' || cleaned === 'n/a') return null;
-      
+
+      // Lista de valores no enteros que deben ser null
+      const nonIntegerValues = ['', 'N/A', 'n/a', 'Abierto', 'abierto', 'ABIERTO', 'null', 'NULL', '-', '--'];
+      if (nonIntegerValues.includes(cleaned)) return null;
+
       const num = parseInt(cleaned, 10);
       return isNaN(num) ? null : num;
     }
@@ -175,8 +248,11 @@ class ObrasService {
     if (typeof value === 'string') {
       // Limpiar espacios y caracteres no numéricos básicos
       const cleaned = value.trim().replace(',', '.');
-      if (cleaned === '' || cleaned === 'N/A' || cleaned === 'n/a' || cleaned === 'Abierto' || cleaned === 'abierto') return null;
-      
+
+      // Lista de valores no numéricos que deben ser null
+      const nonNumericValues = ['', 'N/A', 'n/a', 'Abierto', 'abierto', 'ABIERTO', 'null', 'NULL', '-', '--'];
+      if (nonNumericValues.includes(cleaned)) return null;
+
       const num = parseFloat(cleaned);
       return isNaN(num) ? null : num;
     }
@@ -199,15 +275,24 @@ class ObrasService {
   /**
    * Actualiza un registro en la tabla proyectos_inmobiliarios
    */
-  static async updateProyecto(data: any, userId: number) {
+  static async updateProyecto(data: any, userId: number, results: any) {
     const client = await pool.connect();
     
     try {
       await client.query('BEGIN');
 
-      // Buscar si el proyecto ya existe por cod_integracion
+      // Buscar si el proyecto ya existe por cod_integracion (usar la misma conversión que en INSERT)
+      const codIntegracion = this.excelToInt(data.cod_integracion);
+
+      if (!codIntegracion) {
+        throw new Error(`cod_integracion inválido o vacío: ${data.cod_integracion}`);
+      }
+
       const existingQuery = 'SELECT * FROM proyectos_inmobiliarios WHERE cod_integracion = $1';
-      const existing = await client.query(existingQuery, [data.cod_integracion]);
+      const existing = await client.query(existingQuery, [codIntegracion]);
+
+      console.log(`🔍 [OBRAS] Buscando cod_integracion: ${codIntegracion} (original: ${data.cod_integracion})`);
+      console.log(`📊 [OBRAS] Registros encontrados: ${existing.rows.length}`);
 
       let isUpdate = false;
       let projectId: number;
@@ -242,16 +327,87 @@ class ObrasService {
         for (const field of fieldsToCompare) {
           let newValue = data[field];
           let oldValue = oldRecord[field];
-          
-          // Convertir fechas si es necesario
+
+          // Aplicar las mismas conversiones que en el UPDATE
           if (field.includes('_solicitud') || field.includes('_entrega') || field.includes('_prevista') || field.includes('_real') || field === 'apertura_cc') {
+            // Campos de fecha
             newValue = this.excelDateToPostgres(newValue);
-            oldValue = oldValue ? oldValue.toISOString().split('T')[0] : null;
+            // Convertir oldValue de cualquier formato a string YYYY-MM-DD
+            if (oldValue === null || oldValue === undefined) {
+              oldValue = null;
+            } else if (oldValue instanceof Date) {
+              // Usar fecha local para ser consistente con excelDateToPostgres
+              const year = oldValue.getFullYear();
+              const month = String(oldValue.getMonth() + 1).padStart(2, '0');
+              const day = String(oldValue.getDate()).padStart(2, '0');
+              oldValue = `${year}-${month}-${day}`;
+            } else if (typeof oldValue === 'string') {
+              // Si ya es string de fecha, normalizar formato
+              if (oldValue.includes('T')) {
+                oldValue = oldValue.split('T')[0]; // '2025-05-28T10:00:00Z' -> '2025-05-28'
+              } else if (oldValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                oldValue = oldValue; // Ya está en formato correcto '2025-05-28'
+              } else {
+                // Otros formatos de string, intentar parsear
+                const parsed = new Date(oldValue);
+                if (!isNaN(parsed.getTime())) {
+                  // Usar fecha local para ser consistente
+                  const year = parsed.getFullYear();
+                  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+                  const day = String(parsed.getDate()).padStart(2, '0');
+                  oldValue = `${year}-${month}-${day}`;
+                } else {
+                  oldValue = null;
+                }
+              }
+            } else {
+              // Otros tipos de objetos
+              try {
+                const parsed = new Date(oldValue);
+                if (!isNaN(parsed.getTime())) {
+                  // Usar fecha local para ser consistente
+                  const year = parsed.getFullYear();
+                  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+                  const day = String(parsed.getDate()).padStart(2, '0');
+                  oldValue = `${year}-${month}-${day}`;
+                } else {
+                  oldValue = null;
+                }
+              } catch (e) {
+                console.warn(`⚠️ [OBRAS] Error convirtiendo fecha para campo ${field}:`, e.message);
+                oldValue = null;
+              }
+            }
+          } else if (field === 'codigo' || field === 'cod_cont_proy' || field === 'plantas') {
+            // Campos enteros
+            newValue = this.excelToInt(newValue);
+            // Convertir oldValue a number para comparación consistente
+            oldValue = typeof oldValue === 'string' ? parseInt(oldValue, 10) : oldValue;
+            oldValue = isNaN(oldValue) ? null : oldValue;
+          } else if (field === 'sup_alq') {
+            // Campo numérico decimal
+            newValue = this.excelToNumeric(newValue);
+            // Convertir oldValue a number para comparación consistente
+            oldValue = typeof oldValue === 'string' ? parseFloat(oldValue) : oldValue;
+            oldValue = isNaN(oldValue) ? null : oldValue;
+          } else {
+            // Campos de texto - normalizar valores nulos/vacíos Y espacios
+
+            // Primero normalizar null/undefined/empty
+            if (newValue === null || newValue === undefined || newValue === '' || newValue === 'null') {
+              newValue = null;
+            } else {
+              newValue = String(newValue).trim();
+              if (newValue === '' || newValue === 'null') newValue = null;
+            }
+
+            if (oldValue === null || oldValue === undefined || oldValue === '' || oldValue === 'null') {
+              oldValue = null;
+            } else {
+              oldValue = String(oldValue).trim();
+              if (oldValue === '' || oldValue === 'null') oldValue = null;
+            }
           }
-          
-          // Normalizar valores nulos
-          newValue = newValue === '' || newValue === undefined ? null : newValue;
-          oldValue = oldValue === '' || oldValue === undefined ? null : oldValue;
           
           if (newValue !== oldValue) {
             changes.push({
@@ -259,6 +415,14 @@ class ObrasService {
               valorAnterior: oldValue,
               valorNuevo: newValue
             });
+
+            // Debug logging limitado - mostrar tipos y valores exactos
+            if (changes.length === 1) {
+              console.log(`🔍 [OBRAS] Campo ${field} cambió en cod_integracion ${codIntegracion}:`);
+              console.log(`   oldValue: ${JSON.stringify(oldValue)} (tipo: ${typeof oldValue})`);
+              console.log(`   newValue: ${JSON.stringify(newValue)} (tipo: ${typeof newValue})`);
+              console.log(`   son iguales: ${oldValue === newValue}, son mismo tipo: ${typeof oldValue === typeof newValue}`);
+            }
           }
         }
         
@@ -285,9 +449,9 @@ class ObrasService {
           `;
           
           const values = [
-            data.mercado || null, data.ciudad || null, data.cadena || null, data.codigo || null, data.cod_cont_proy || null,
+            data.mercado || null, data.ciudad || null, data.cadena || null, this.excelToInt(data.codigo), this.excelToInt(data.cod_cont_proy),
             data.proyecto || null, data.estado_proy || null, data.inmueble || null, data.direccion || null, data.num_local || null,
-            data.plantas || null, data.tipo || null, data.estado || null, data.sup_alq || null, data.secciones || null,
+            this.excelToInt(data.plantas), data.tipo || null, data.estado || null, this.excelToNumeric(data.sup_alq), data.secciones || null,
             data.franquicia || null, data.tipo_proy || null, data.imagen || null, data.zonificacion_solicitud || null,
             data.zonificacion_entrega || null, this.excelDateToPostgres(data.plano_lic_solicitud), this.excelDateToPostgres(data.plano_lic_entrega),
             this.excelDateToPostgres(data.plano_obra_solicitud), this.excelDateToPostgres(data.plano_obra_entrega), this.excelDateToPostgres(data.aa_solicitud),
@@ -299,7 +463,7 @@ class ObrasService {
             this.excelDateToPostgres(data.inicio_obra_real), this.excelDateToPostgres(data.aprob_mobiliario_prevista), this.excelDateToPostgres(data.aprob_mobiliario_real),
             this.excelDateToPostgres(data.ent_mobiliario_prevista), this.excelDateToPostgres(data.ent_mobiliario_real), this.excelDateToPostgres(data.ent_mercancia_prevista),
             this.excelDateToPostgres(data.ent_mercancia_real), this.excelDateToPostgres(data.apert_espacio_prevista), this.excelDateToPostgres(data.apert_espacio_real),
-            data.desc_proy || null, data.obs_generales || null, data.cod_integracion
+            data.desc_proy || null, data.obs_generales || null, codIntegracion
           ];
           
           await client.query(updateQuery, values);
@@ -321,11 +485,29 @@ class ObrasService {
             // No relanzar el error - el UPDATE principal debe completarse
           }
 
-          console.log(`📝 [OBRAS] Proyecto actualizado: ${data.cod_integracion} (${changes.length} cambios)`);
+          console.log(`📝 [OBRAS] Proyecto actualizado: ${codIntegracion} (${changes.length} cambios)`);
           actionResult = { action: 'updated', projectId, changes: changes.length };
         } else {
-          console.log(`📝 [OBRAS] Proyecto sin cambios: ${data.cod_integracion}`);
+          console.log(`📝 [OBRAS] Proyecto sin cambios: ${codIntegracion}`);
           actionResult = { action: 'no_changes', projectId, changes: 0 };
+        }
+
+        console.log(`📊 [OBRAS] Comparación completa para ${codIntegracion}: ${changes.length} cambios detectados`);
+
+        // Debug detallado para registros con cambios (limitado)
+        if (existing.rows.length > 0 && changes.length > 0) {
+          console.log(`🔍 [OBRAS] DEBUGGING cod_integracion ${codIntegracion}:`);
+          console.log(`   - Registro existente en BD:`, JSON.stringify(oldRecord, null, 2));
+          console.log(`   - Datos del Excel (primeros campos):`, {
+            mercado: data.mercado,
+            ciudad: data.ciudad,
+            codigo: data.codigo,
+            plantas: data.plantas,
+            sup_alq: data.sup_alq
+          });
+          if (changes.length > 0) {
+            console.log(`   - Cambios detectados:`, changes.slice(0, 3));
+          }
         }
         
       } else {
@@ -359,8 +541,8 @@ class ObrasService {
           data.mercado || null, 
           data.ciudad || null, 
           data.cadena || null, 
-          this.excelToInt(data.codigo), 
-          this.excelToInt(data.cod_integracion),
+          this.excelToInt(data.codigo),
+          codIntegracion, // Usar la variable ya calculada
           this.excelToInt(data.cod_cont_proy), 
           data.proyecto || null,
           
@@ -453,7 +635,7 @@ class ObrasService {
         
         const result = await client.query(insertQuery, values);
         projectId = result.rows[0].id;
-        console.log(`💾 [OBRAS] INSERT exitoso - ID generado: ${projectId} para cod_integracion: ${data.cod_integracion}`);
+        console.log(`💾 [OBRAS] INSERT exitoso - ID generado: ${projectId} para cod_integracion: ${codIntegracion}`);
         
         // Registrar creación en el historial (opcional - no debe fallar la transacción principal)
         try {
@@ -468,12 +650,12 @@ class ObrasService {
           // No relanzar el error - el INSERT principal debe completarse
         }
 
-        console.log(`✨ [OBRAS] Proyecto creado: ${data.cod_integracion}`);
+        console.log(`✨ [OBRAS] Proyecto creado: ${codIntegracion}`);
         actionResult = { action: 'created', projectId, changes: 1 };
       }
 
       await client.query('COMMIT');
-      console.log(`✅ [OBRAS] TRANSACCIÓN CONFIRMADA - Proyecto ${actionResult.action}: ${data.cod_integracion} (ID: ${projectId})`);
+      console.log(`✅ [OBRAS] TRANSACCIÓN CONFIRMADA - Proyecto ${actionResult.action}: ${codIntegracion} (ID: ${projectId})`);
       return actionResult;
       
     } catch (error) {
@@ -509,21 +691,22 @@ class ObrasService {
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       
-      // Debug del registro actual
-      if (i < 3) { // Solo para los primeros 3 registros para no saturar los logs
-        console.log(`📊 [OBRAS] Procesando registro ${i + 1}:`, JSON.stringify(row, null, 2));
+      // Progress logging cada 50 registros para no saturar logs
+      if (i % 50 === 0 || i < 3) {
+        console.log(`📊 [OBRAS] Progreso: ${i + 1}/${data.length} registros procesados`);
       }
       
-      // Validar que tenga cod_integracion
-      if (!row.cod_integracion) {
-        console.warn(`⚠️ [OBRAS] Fila ${i + 1} sin cod_integracion, saltando:`, row);
+      // Validar que tenga cod_integracion válido
+      const codIntegracionRow = this.excelToInt(row.cod_integracion);
+      if (!codIntegracionRow) {
+        console.warn(`⚠️ [OBRAS] Fila ${i + 1} sin cod_integracion válido, saltando. Valor original: "${row.cod_integracion}"`);
         results.errors++;
         continue;
       }
-      
+
       try {
-        console.log(`📊 [OBRAS] Procesando cod_integracion: ${row.cod_integracion}`);
-        const result = await this.updateProyecto(row, userId);
+        console.log(`📊 [OBRAS] Procesando cod_integracion: ${codIntegracionRow} (original: ${row.cod_integracion})`);
+        const result = await this.updateProyecto(row, userId, results);
         results.processed++;
         
         if (result.action === 'created') {
@@ -539,7 +722,7 @@ class ObrasService {
         }
         
       } catch (error) {
-        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, cod_integracion ${row.cod_integracion}:`, error);
+        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, cod_integracion ${codIntegracionRow} (original: ${row.cod_integracion}):`, error);
         console.error(`❌ [OBRAS] Stack trace:`, error.stack);
         results.errors++;
       }
@@ -554,6 +737,91 @@ class ObrasService {
 // Rutas de la API
 // ================================
 export const obrasRoutes = new Hono<{ Variables: Variables }>();
+
+/**
+ * POST /api/obras/download-excel
+ * Descarga un nuevo archivo Excel ejecutando el scraper
+ */
+obrasRoutes.post('/api/obras/download-excel', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+  try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: 'Usuario no autenticado' }, 401);
+    }
+
+    console.log(`📥 [OBRAS] Iniciando descarga de Excel por usuario: ${user.userId}`);
+
+    const result = await ObrasService.downloadNewExcelFile();
+
+    if (result.success) {
+      return c.json({
+        success: true,
+        message: result.message,
+        fileName: result.fileName
+      });
+    } else {
+      return c.json({
+        success: false,
+        error: result.message
+      }, 500);
+    }
+
+  } catch (error) {
+    console.error('❌ [OBRAS] Error descargando Excel:', error);
+    return c.json({
+      success: false,
+      error: error.message || 'Error interno del servidor'
+    }, 500);
+  }
+});
+
+/**
+ * POST /api/obras/download-and-process
+ * Descarga un nuevo Excel y lo procesa inmediatamente
+ */
+obrasRoutes.post('/api/obras/download-and-process', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+  try {
+    const user = c.get('user');
+    if (!user) {
+      return c.json({ error: 'Usuario no autenticado' }, 401);
+    }
+
+    console.log(`🔄 [OBRAS] Iniciando descarga y procesamiento completo por usuario: ${user.userId}`);
+
+    // Paso 1: Descargar nuevo Excel
+    console.log(`📥 [OBRAS] Paso 1: Descargando nuevo archivo Excel...`);
+    const downloadResult = await ObrasService.downloadNewExcelFile();
+
+    if (!downloadResult.success) {
+      return c.json({
+        success: false,
+        error: `Error en la descarga: ${downloadResult.message}`
+      }, 500);
+    }
+
+    console.log(`✅ [OBRAS] Excel descargado: ${downloadResult.fileName}`);
+
+    // Paso 2: Procesar el Excel descargado
+    console.log(`📊 [OBRAS] Paso 2: Procesando Excel descargado...`);
+    const processResult = await ObrasService.processAndUpdateFromExcel(user.userId);
+
+    return c.json({
+      success: true,
+      message: 'Excel descargado y procesado exitosamente',
+      download: {
+        fileName: downloadResult.fileName
+      },
+      process: processResult
+    });
+
+  } catch (error) {
+    console.error('❌ [OBRAS] Error en descarga y procesamiento:', error);
+    return c.json({
+      success: false,
+      error: error.message || 'Error interno del servidor'
+    }, 500);
+  }
+});
 
 /**
  * POST /api/obras/process-excel
