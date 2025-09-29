@@ -329,8 +329,9 @@ class ObrasService {
           let oldValue = oldRecord[field];
 
           // Aplicar las mismas conversiones que en el UPDATE
-          if (field.includes('_solicitud') || field.includes('_entrega') || field.includes('_prevista') || field.includes('_real') || field === 'apertura_cc') {
-            // Campos de fecha
+          if ((field.includes('_solicitud') || field.includes('_entrega') || field.includes('_prevista') || field.includes('_real') || field === 'apertura_cc')
+              && field !== 'zonificacion_solicitud' && field !== 'zonificacion_entrega') {
+            // Campos de fecha (excluyendo zonificacion_* que son text)
             newValue = this.excelDateToPostgres(newValue);
             // Convertir oldValue de cualquier formato a string YYYY-MM-DD
             if (oldValue === null || oldValue === undefined) {
@@ -416,12 +417,15 @@ class ObrasService {
               valorNuevo: newValue
             });
 
-            // Debug logging limitado - mostrar tipos y valores exactos
-            if (changes.length === 1) {
-              console.log(`🔍 [OBRAS] Campo ${field} cambió en cod_integracion ${codIntegracion}:`);
-              console.log(`   oldValue: ${JSON.stringify(oldValue)} (tipo: ${typeof oldValue})`);
-              console.log(`   newValue: ${JSON.stringify(newValue)} (tipo: ${typeof newValue})`);
-              console.log(`   son iguales: ${oldValue === newValue}, son mismo tipo: ${typeof oldValue === typeof newValue}`);
+            // Debug logging detallado para entender diferencias
+            console.log(`🔍 [OBRAS] CAMBIO DETECTADO en cod_integracion ${codIntegracion}, campo ${field}:`);
+            console.log(`   oldValue: ${JSON.stringify(oldValue)} (tipo: ${typeof oldValue})`);
+            console.log(`   newValue: ${JSON.stringify(newValue)} (tipo: ${typeof newValue})`);
+            console.log(`   son iguales: ${oldValue === newValue}, son mismo tipo: ${typeof oldValue === typeof newValue}`);
+
+            // Logging adicional para campos específicos problemáticos
+            if (field.includes('date') || field.includes('fecha') || field.includes('_solicitud') || field.includes('_entrega')) {
+              console.log(`   🗓️ FECHA - oldValue length: ${oldValue?.length}, newValue length: ${newValue?.length}`);
             }
           }
         }
@@ -494,20 +498,10 @@ class ObrasService {
 
         console.log(`📊 [OBRAS] Comparación completa para ${codIntegracion}: ${changes.length} cambios detectados`);
 
-        // Debug detallado para registros con cambios (limitado)
+        // Debug simplificado para registros con cambios
         if (existing.rows.length > 0 && changes.length > 0) {
-          console.log(`🔍 [OBRAS] DEBUGGING cod_integracion ${codIntegracion}:`);
-          console.log(`   - Registro existente en BD:`, JSON.stringify(oldRecord, null, 2));
-          console.log(`   - Datos del Excel (primeros campos):`, {
-            mercado: data.mercado,
-            ciudad: data.ciudad,
-            codigo: data.codigo,
-            plantas: data.plantas,
-            sup_alq: data.sup_alq
-          });
-          if (changes.length > 0) {
-            console.log(`   - Cambios detectados:`, changes.slice(0, 3));
-          }
+          console.log(`🔍 [OBRAS] cod_integracion ${codIntegracion} tiene ${changes.length} cambios:`);
+          console.log(`   - Cambios:`, changes.map(c => `${c.campo}: "${c.valorAnterior}" → "${c.valorNuevo}"`));
         }
         
       } else {
