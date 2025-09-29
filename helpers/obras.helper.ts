@@ -400,6 +400,8 @@ class ObrasService {
             } else {
               newValue = String(newValue).trim();
               if (newValue === '' || newValue === 'null') newValue = null;
+              // Para el campo secciones, tratar "0" como null para mantener consistencia
+              if (field === 'secciones' && newValue === '0') newValue = null;
             }
 
             if (oldValue === null || oldValue === undefined || oldValue === '' || oldValue === 'null') {
@@ -407,6 +409,8 @@ class ObrasService {
             } else {
               oldValue = String(oldValue).trim();
               if (oldValue === '' || oldValue === 'null') oldValue = null;
+              // Para el campo secciones, tratar "0" como null para mantener consistencia
+              if (field === 'secciones' && oldValue === '0') oldValue = null;
             }
           }
           
@@ -541,19 +545,19 @@ class ObrasService {
           data.proyecto || null,
           
           // Grupo 2: estado y ubicación (8 valores)
-          this.truncateString(data.estado_proy, 50), 
+          data.estado_proy || null, 
           data.inmueble || null, 
           data.direccion || null, 
-          this.truncateString(data.num_local, 50), 
+          data.num_local || null, 
           this.excelToInt(data.plantas), 
-          this.truncateString(data.tipo, 100), 
-          this.truncateString(data.estado, 100), 
+          data.tipo || null, 
+          data.estado || null, 
           this.excelToNumeric(data.sup_alq),
           
           // Grupo 3: secciones y zonificación (6 valores)
           data.secciones || null, 
-          this.truncateString(data.franquicia, 50), 
-          this.truncateString(data.tipo_proy, 100), 
+          data.franquicia || null, 
+          data.tipo_proy || null, 
           data.imagen || null, 
           data.zonificacion_solicitud || null,
           data.zonificacion_entrega || null, 
@@ -579,9 +583,9 @@ class ObrasService {
           this.excelDateToPostgres(data.lic_obra_entrega),
           
           // Grupo 7: aprobaciones y constructora (5 valores)
-          this.truncateString(data.aprob_lic, 50), 
-          this.truncateString(data.aprob_propietario, 50), 
-          this.truncateString(data.aprob_cc, 50), 
+          data.aprob_lic || null, 
+          data.aprob_propietario || null, 
+          data.aprob_cc || null, 
           data.constructora || null,
           this.excelDateToPostgres(data.apertura_cc), 
           
