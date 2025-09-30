@@ -17,6 +17,7 @@ import { permissionRoutes } from '../helpers/permissions.helper';
 import { assignmentRoutes } from '../helpers/assignments.helper';
 import { keycloakAuthRoutes } from '../helpers/keycloak-auth.helper';
 import { obrasRoutes } from '../helpers/obras.helper';
+import { wallpaperRoutes } from '../helpers/wallpapers.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -53,6 +54,12 @@ routes.use('*', (c, next) => {
   return next();
 });
 
+// Servir archivos estáticos de wallpapers ANTES de las rutas autenticadas
+routes.use('/wallpapers/*', serveStatic({
+  root: './',
+  rewriteRequestPath: (path) => path.replace(/^\/wallpapers/, '/wallpapers')
+}));
+
 // IMPORTANTE: keycloakAuthRoutes PRIMERO para evitar conflictos de rutas
 routes.route('/', keycloakAuthRoutes);
 routes.route('/', authRoutes);
@@ -64,3 +71,4 @@ routes.route('/', labelRoutes);
 routes.route('/', permissionRoutes);
 routes.route('/', assignmentRoutes);
 routes.route('/', obrasRoutes);
+routes.route('/', wallpaperRoutes);
