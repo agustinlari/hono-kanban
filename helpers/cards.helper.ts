@@ -19,7 +19,7 @@ class CardService {
    * Calcula automáticamente la posición para que se añada al final.
    */
   static async createCard(data: CreateCardPayload): Promise<Card> {
-    const { title, list_id } = data;
+    const { title, list_id, proyecto_id } = data;
 
     const client = await pool.connect();
     try {
@@ -40,10 +40,10 @@ class CardService {
 
       // 3. Insertar la nueva tarjeta.
       const query = `
-        INSERT INTO cards (title, list_id, position) 
-        VALUES ($1, $2, $3) RETURNING *;
+        INSERT INTO cards (title, list_id, position, proyecto_id)
+        VALUES ($1, $2, $3, $4) RETURNING *;
       `;
-      const result = await client.query(query, [title, list_id, newPosition]);
+      const result = await client.query(query, [title, list_id, newPosition, proyecto_id || null]);
       
       await client.query('COMMIT');
       
@@ -307,16 +307,16 @@ class CardService {
             'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2 AND position <= $3',
             [sourceListId, originalIndex, newIndex]
           );
-        } 
+        }
         // Si se mueve de una posición alta a una baja (ej: 3 -> 1)
-        else { 
+        else {
           // Las tarjetas entre la posición nueva y la antigua avanzan un lugar.
           await client.query(
             'UPDATE cards SET position = position + 1 WHERE list_id = $1 AND position >= $2 AND position < $3',
             [sourceListId, newIndex, originalIndex]
           );
         }
-      } 
+      }
       // CASO B: Mover a una lista diferente
       else {
         // 2a. Cerrar el hueco en la lista de origen.
@@ -339,12 +339,34 @@ class CardService {
         'UPDATE cards SET list_id = $1, position = $2 WHERE id = $3',
         [targetListId, newIndex, cardId]
       );
-      
+
       await client.query('COMMIT');
 
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error en CardService.moveCard:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Obtiene todos los proyectos disponibles para asociar a tarjetas
+   */
+  static async getAvailableProjects(): Promise<any[]> {
+    const client = await pool.connect();
+    try {
+      const query = `
+        SELECT id, nombre_proyecto, descripcion, estado, activo
+        FROM proyectos
+        WHERE activo = true
+        ORDER BY nombre_proyecto ASC
+      `;
+      const result = await client.query(query);
+      return result.rows;
+    } catch (error) {
+      console.error('Error en CardService.getAvailableProjects:', error);
       throw error;
     } finally {
       client.release();
@@ -420,7 +442,7 @@ class CardController {
   static async move(c: Context) {
     try {
       const data: MoveCardPayload = await c.req.json();
-      
+
       // DEBUG: Agregar logging para ver qué datos se están recibiendo
       console.log('=== BACKEND CARD MOVE DEBUG ===');
       console.log('Datos recibidos:', JSON.stringify(data, null, 2));
@@ -430,13 +452,13 @@ class CardController {
       console.log('- targetListId:', typeof data.targetListId, 'valor:', data.targetListId);
       console.log('- newIndex:', typeof data.newIndex, 'valor:', data.newIndex);
       console.log('===============================');
-      
+
       // Validación y conversión de tipos si es necesario
       const cardId = String(data.cardId);
       const sourceListId = typeof data.sourceListId === 'string' ? parseInt(data.sourceListId) : data.sourceListId;
       const targetListId = typeof data.targetListId === 'string' ? parseInt(data.targetListId) : data.targetListId;
       const newIndex = typeof data.newIndex === 'string' ? parseInt(data.newIndex) : data.newIndex;
-      
+
       // Validación básica
       if (!cardId || isNaN(sourceListId) || isNaN(targetListId) || isNaN(newIndex)) {
         console.log('❌ Error de validación:');
@@ -444,7 +466,7 @@ class CardController {
         console.log('- sourceListId válido:', !isNaN(sourceListId));
         console.log('- targetListId válido:', !isNaN(targetListId));
         console.log('- newIndex válido:', !isNaN(newIndex));
-        return c.json({ 
+        return c.json({
           error: 'Parámetros inválidos',
           details: {
             cardId: !!cardId,
@@ -454,20 +476,20 @@ class CardController {
           }
         }, 400);
       }
-      
+
       const moveData = {
         cardId,
         sourceListId,
         targetListId,
         newIndex
       };
-      
+
       console.log('✅ Datos procesados para CardService.moveCard:', moveData);
-      
+
       await CardService.moveCard(moveData);
-      
+
       console.log('✅ Tarjeta movida exitosamente');
-      
+
       // La operación fue exitosa, no es necesario devolver contenido.
       return c.body(null, 204);
 
@@ -477,6 +499,19 @@ class CardController {
         return c.json({ error: error.message }, 404);
       }
       return c.json({ error: 'No se pudo mover la tarjeta', details: error.message }, 500);
+    }
+  }
+
+  /**
+   * Obtiene todos los proyectos disponibles para asociar a tarjetas
+   */
+  static async getProjects(c: Context) {
+    try {
+      const projects = await CardService.getAvailableProjects();
+      return c.json(projects, 200);
+    } catch (error: any) {
+      console.error('Error en CardController.getProjects:', error);
+      return c.json({ error: 'No se pudieron obtener los proyectos' }, 500);
     }
   }
 }
@@ -493,3 +528,6 @@ cardRoutes.post('/cards', requirePermission(PermissionAction.CREATE_CARDS), Card
 cardRoutes.put('/cards/:id', requirePermission(PermissionAction.EDIT_CARDS), CardController.update);
 cardRoutes.delete('/cards/:id', requirePermission(PermissionAction.DELETE_CARDS), CardController.delete);
 cardRoutes.patch('/cards/move', requirePermission(PermissionAction.MOVE_CARDS), CardController.move);
+
+// Endpoint para obtener proyectos disponibles
+cardRoutes.get('/cards/projects', CardController.getProjects);

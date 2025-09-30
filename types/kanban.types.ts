@@ -1,5 +1,20 @@
 // En: src/types/kanban.types.ts
 
+// Refleja la tabla 'proyectos' de la BBDD
+export interface Proyecto {
+  id: number;
+  creado_manualmente: boolean;
+  nombre_proyecto: string | null;
+  ciudad: string | null;
+  estado: string | null;
+  descripcion: string | null;
+  obs_generales: string | null;
+  activo: boolean;
+  fecha_cambio: Date;
+  cod_integracion: number | null;
+  // ... otros campos específicos de inmobiliarios se pueden agregar si es necesario
+}
+
 // Refleja la tabla 'labels' de la BBDD
 export interface Label {
     id: number;
@@ -18,12 +33,19 @@ export interface Card {
     position: number;
     image_url: string | null;
     list_id: number;
+    proyecto_id: number | null; // Proyecto asociado a la tarjeta
     start_date: Date | null;
     due_date: Date | null;
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
     assignees?: CardAssignee[]; // Usuarios asignados a la tarjeta
+    proyecto?: {
+        id: number;
+        nombre_proyecto: string;
+        descripcion: string | null;
+        estado: string | null;
+    }; // Información completa del proyecto asociado (solo cuando se incluye en JOIN)
 }
 
 // Refleja la tabla 'lists' de la BBDD, pero le añadimos un array para contener sus tarjetas
@@ -62,6 +84,7 @@ export interface CreateListPayload {
 export interface CreateCardPayload {
     title: string;
     list_id: number;
+    proyecto_id?: number | null;
 }
 
 export interface UpdateCardPositionPayload {
@@ -75,6 +98,7 @@ export interface UpdateCardPayload {
   title?: string;
   description?: string;
   image_url?: string;
+  proyecto_id?: number | null;
   start_date?: Date | null;
   due_date?: Date | null;
   labels?: Label[]; // Añadir soporte para actualizar etiquetas

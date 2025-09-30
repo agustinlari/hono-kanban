@@ -34,14 +34,16 @@ class BoardService {
     }
     const boardData = boardResult.rows[0];
 
-    // 2. Obtener todas las listas Y tarjetas de ese tablero con un solo JOIN
+    // 2. Obtener todas las listas Y tarjetas de ese tablero con un solo JOIN (incluye proyectos)
     const listsAndCardsQuery = `
-      SELECT 
+      SELECT
         l.id as list_id, l.title as list_title, l.position as list_position,
-        c.id as card_id, c.title as card_title, c.description, c.position as card_position, 
-        c.image_url, c.start_date, c.due_date
+        c.id as card_id, c.title as card_title, c.description, c.position as card_position,
+        c.image_url, c.start_date, c.due_date, c.proyecto_id,
+        p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.estado as proyecto_estado
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
+      LEFT JOIN proyectos p ON c.proyecto_id = p.id
       WHERE l.board_id = $1
       ORDER BY l.position, c.position;
     `;
@@ -133,20 +135,33 @@ class BoardService {
       // Si la fila tiene datos de una tarjeta, la añadimos a su lista
       if (row.card_id) {
         const list = listsMap.get(row.list_id)!;
-        list.cards.push({
+        const cardData: any = {
           id: row.card_id,
           title: row.card_title,
           description: row.description,
           position: row.card_position,
           image_url: row.image_url,
           list_id: row.list_id,
+          proyecto_id: row.proyecto_id || null,
           start_date: row.start_date || null,
           due_date: row.due_date || null,
           created_at: new Date(),
           updated_at: new Date(),
           labels: cardLabelsMap.get(row.card_id) || [],
           assignees: cardAssigneesMap.get(row.card_id) || []
-        });
+        };
+
+        // Agregar información del proyecto si existe
+        if (row.proyecto_id && row.nombre_proyecto) {
+          cardData.proyecto = {
+            id: row.proyecto_id,
+            nombre_proyecto: row.nombre_proyecto,
+            descripcion: row.proyecto_descripcion,
+            estado: row.proyecto_estado
+          };
+        }
+
+        list.cards.push(cardData);
       }
     }
 
