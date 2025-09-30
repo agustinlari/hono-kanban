@@ -44,10 +44,36 @@ class CardService {
         VALUES ($1, $2, $3, $4) RETURNING *;
       `;
       const result = await client.query(query, [title, list_id, newPosition, proyecto_id || null]);
-      
+
       await client.query('COMMIT');
-      
-      return result.rows[0] as Card;
+
+      const newCard = result.rows[0];
+
+      // Si hay proyecto_id, obtener la información del proyecto
+      if (newCard.proyecto_id) {
+        const projectQuery = `
+          SELECT id, nombre_proyecto, descripcion, estado, codigo, cod_integracion, cadena, direccion
+          FROM proyectos
+          WHERE id = $1
+        `;
+        const projectResult = await client.query(projectQuery, [newCard.proyecto_id]);
+
+        if (projectResult.rowCount > 0) {
+          const project = projectResult.rows[0];
+          newCard.proyecto = {
+            id: project.id,
+            nombre_proyecto: project.nombre_proyecto,
+            descripcion: project.descripcion,
+            estado: project.estado,
+            codigo: project.codigo,
+            cod_integracion: project.cod_integracion,
+            cadena: project.cadena,
+            direccion: project.direccion
+          };
+        }
+      }
+
+      return newCard as Card;
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -172,12 +198,16 @@ class CardService {
 
       await client.query('COMMIT');
       
-      // Después de actualizar, obtener la tarjeta completa con asignaciones y etiquetas
+      // Después de actualizar, obtener la tarjeta completa con asignaciones, etiquetas y proyecto
       const fullCardQuery = `
         SELECT c.*,
                COALESCE(assignees_agg.assignees, '[]') AS assignees,
-               COALESCE(labels_agg.labels, '[]') AS labels
+               COALESCE(labels_agg.labels, '[]') AS labels,
+               p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.estado as proyecto_estado,
+               p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
+               p.cadena as proyecto_cadena, p.direccion as proyecto_direccion
         FROM cards c
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
         LEFT JOIN (
           SELECT ca.card_id,
                  json_agg(
@@ -222,7 +252,21 @@ class CardService {
       const fullCard = fullCardResult.rows[0];
       fullCard.assignees = fullCard.assignees || [];
       fullCard.labels = fullCard.labels || [];
-      
+
+      // Agregar información del proyecto si existe
+      if (fullCard.proyecto_id && fullCard.nombre_proyecto) {
+        fullCard.proyecto = {
+          id: fullCard.proyecto_id,
+          nombre_proyecto: fullCard.nombre_proyecto,
+          descripcion: fullCard.proyecto_descripcion,
+          estado: fullCard.proyecto_estado,
+          codigo: fullCard.proyecto_codigo,
+          cod_integracion: fullCard.proyecto_cod_integracion,
+          cadena: fullCard.proyecto_cadena,
+          direccion: fullCard.proyecto_direccion
+        };
+      }
+
       return fullCard;
 
     } catch (error) {
@@ -358,7 +402,8 @@ class CardService {
     const client = await pool.connect();
     try {
       const query = `
-        SELECT id, nombre_proyecto, descripcion, estado, activo
+        SELECT id, nombre_proyecto, descripcion, estado, activo,
+               codigo, cod_integracion, cadena, direccion
         FROM proyectos
         WHERE activo = true
         ORDER BY nombre_proyecto ASC
