@@ -273,7 +273,7 @@ class ObrasService {
   }
 
   /**
-   * Actualiza un registro en la tabla proyectos_inmobiliarios
+   * Actualiza un registro en la tabla proyectos
    */
   static async updateProyecto(data: any, userId: number, results: any) {
     const client = await pool.connect();
@@ -288,7 +288,7 @@ class ObrasService {
         throw new Error(`cod_integracion inválido o vacío: ${data.cod_integracion}`);
       }
 
-      const existingQuery = 'SELECT * FROM proyectos_inmobiliarios WHERE cod_integracion = $1';
+      const existingQuery = 'SELECT * FROM proyectos WHERE cod_integracion = $1 AND (creado_manualmente = false OR creado_manualmente IS NULL)';
       const existing = await client.query(existingQuery, [codIntegracion]);
 
       console.log(`🔍 [OBRAS] Buscando cod_integracion: ${codIntegracion} (original: ${data.cod_integracion})`);
@@ -309,8 +309,8 @@ class ObrasService {
         
         // Lista de campos a comparar (excluyendo id, fecha_cambio, activo)
         const fieldsToCompare = [
-          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_cont_proy', 'proyecto',
-          'estado_proy', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo',
+          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_cont_proy', 'nombre_proyecto',
+          'estado', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo',
           'estado', 'sup_alq', 'secciones', 'franquicia', 'tipo_proy', 'imagen',
           'zonificacion_solicitud', 'zonificacion_entrega', 'plano_lic_solicitud',
           'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega',
@@ -321,11 +321,15 @@ class ObrasService {
           'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real',
           'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista',
           'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real',
-          'apert_espacio_prevista', 'apert_espacio_real', 'desc_proy', 'obs_generales'
+          'apert_espacio_prevista', 'apert_espacio_real', 'descripcion', 'obs_generales'
         ];
         
         for (const field of fieldsToCompare) {
-          let newValue = data[field];
+          // Mapear nombres de campos del Excel a nombres de BD
+          const excelField = field === 'nombre_proyecto' ? 'proyecto' :
+                             field === 'estado' ? 'estado_proy' :
+                             field === 'descripcion' ? 'desc_proy' : field;
+          let newValue = data[excelField];
           let oldValue = oldRecord[field];
 
           // Aplicar las mismas conversiones que en el UPDATE
@@ -437,29 +441,29 @@ class ObrasService {
         if (changes.length > 0) {
           // Realizar actualización
           const updateQuery = `
-            UPDATE proyectos_inmobiliarios SET
+            UPDATE proyectos SET
               mercado = $1, ciudad = $2, cadena = $3, codigo = $4, cod_cont_proy = $5,
-              proyecto = $6, estado_proy = $7, inmueble = $8, direccion = $9, num_local = $10,
-              plantas = $11, tipo = $12, estado = $13, sup_alq = $14, secciones = $15,
-              franquicia = $16, tipo_proy = $17, imagen = $18, zonificacion_solicitud = $19,
-              zonificacion_entrega = $20, plano_lic_solicitud = $21, plano_lic_entrega = $22,
-              plano_obra_solicitud = $23, plano_obra_entrega = $24, aa_solicitud = $25,
-              aa_entrega = $26, ci_solicitud = $27, ci_entrega = $28, bt_solicitud = $29,
-              bt_entrega = $30, insp_tecnica_solicitud = $31, insp_tecnica_entrega = $32,
-              lic_obra_solicitud = $33, lic_obra_entrega = $34, aprob_lic = $35,
-              aprob_propietario = $36, aprob_cc = $37, constructora = $38, apertura_cc = $39,
-              entrega_local_prevista = $40, entrega_local_real = $41, inicio_obra_prevista = $42,
-              inicio_obra_real = $43, aprob_mobiliario_prevista = $44, aprob_mobiliario_real = $45,
-              ent_mobiliario_prevista = $46, ent_mobiliario_real = $47, ent_mercancia_prevista = $48,
-              ent_mercancia_real = $49, apert_espacio_prevista = $50, apert_espacio_real = $51,
-              desc_proy = $52, obs_generales = $53, fecha_cambio = CURRENT_TIMESTAMP
-            WHERE cod_integracion = $54
+              nombre_proyecto = $6, estado = $7, inmueble = $8, direccion = $9, num_local = $10,
+              plantas = $11, tipo = $12, sup_alq = $13, secciones = $14,
+              franquicia = $15, tipo_proy = $16, imagen = $17, zonificacion_solicitud = $18,
+              zonificacion_entrega = $19, plano_lic_solicitud = $20, plano_lic_entrega = $21,
+              plano_obra_solicitud = $22, plano_obra_entrega = $23, aa_solicitud = $24,
+              aa_entrega = $25, ci_solicitud = $26, ci_entrega = $27, bt_solicitud = $28,
+              bt_entrega = $29, insp_tecnica_solicitud = $30, insp_tecnica_entrega = $31,
+              lic_obra_solicitud = $32, lic_obra_entrega = $33, aprob_lic = $34,
+              aprob_propietario = $35, aprob_cc = $36, constructora = $37, apertura_cc = $38,
+              entrega_local_prevista = $39, entrega_local_real = $40, inicio_obra_prevista = $41,
+              inicio_obra_real = $42, aprob_mobiliario_prevista = $43, aprob_mobiliario_real = $44,
+              ent_mobiliario_prevista = $45, ent_mobiliario_real = $46, ent_mercancia_prevista = $47,
+              ent_mercancia_real = $48, apert_espacio_prevista = $49, apert_espacio_real = $50,
+              descripcion = $51, obs_generales = $52, fecha_cambio = CURRENT_TIMESTAMP
+            WHERE cod_integracion = $53
           `;
           
           const values = [
             data.mercado || null, data.ciudad || null, data.cadena || null, this.excelToInt(data.codigo), this.excelToInt(data.cod_cont_proy),
             data.proyecto || null, data.estado_proy || null, data.inmueble || null, data.direccion || null, data.num_local || null,
-            this.excelToInt(data.plantas), data.tipo || null, data.estado || null, this.excelToNumeric(data.sup_alq), data.secciones || null,
+            this.excelToInt(data.plantas), data.tipo || null, this.excelToNumeric(data.sup_alq), data.secciones || null,
             data.franquicia || null, data.tipo_proy || null, data.imagen || null, data.zonificacion_solicitud || null,
             data.zonificacion_entrega || null, this.excelDateToPostgres(data.plano_lic_solicitud), this.excelDateToPostgres(data.plano_lic_entrega),
             this.excelDateToPostgres(data.plano_obra_solicitud), this.excelDateToPostgres(data.plano_obra_entrega), this.excelDateToPostgres(data.aa_solicitud),
@@ -512,29 +516,33 @@ class ObrasService {
         // Crear nuevo registro  
         // Contar columnas manualmente para debug:
         const columns = [
-          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion', 'cod_cont_proy', 'proyecto', // 7
-          'estado_proy', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo', 'estado', 'sup_alq', // 8 (total 15)
-          'secciones', 'franquicia', 'tipo_proy', 'imagen', 'zonificacion_solicitud', 'zonificacion_entrega', // 6 (total 21)
-          'plano_lic_solicitud', 'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega', // 4 (total 25)
-          'aa_solicitud', 'aa_entrega', 'ci_solicitud', 'ci_entrega', 'bt_solicitud', 'bt_entrega', // 6 (total 31)
-          'insp_tecnica_solicitud', 'insp_tecnica_entrega', 'lic_obra_solicitud', 'lic_obra_entrega', // 4 (total 35)
-          'aprob_lic', 'aprob_propietario', 'aprob_cc', 'constructora', 'apertura_cc', // 5 (total 40)
-          'entrega_local_prevista', 'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real', // 4 (total 44)
-          'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista', // 3 (total 47)
-          'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real', // 3 (total 50)
-          'apert_espacio_prevista', 'apert_espacio_real', 'desc_proy', 'obs_generales' // 4 (total 54)
+          'creado_manualmente', // 1 - Marcar como importado del Excel
+          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion', 'cod_cont_proy', 'nombre_proyecto', // 7 (total 8)
+          'estado', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo', 'sup_alq', // 7 (total 15)
+          'secciones', 'franquicia', 'tipo_proy', 'imagen', 'zonificacion_solicitud', 'zonificacion_entrega', // 6 (total 22)
+          'plano_lic_solicitud', 'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega', // 4 (total 26)
+          'aa_solicitud', 'aa_entrega', 'ci_solicitud', 'ci_entrega', 'bt_solicitud', 'bt_entrega', // 6 (total 32)
+          'insp_tecnica_solicitud', 'insp_tecnica_entrega', 'lic_obra_solicitud', 'lic_obra_entrega', // 4 (total 36)
+          'aprob_lic', 'aprob_propietario', 'aprob_cc', 'constructora', 'apertura_cc', // 5 (total 41)
+          'entrega_local_prevista', 'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real', // 4 (total 45)
+          'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista', // 3 (total 48)
+          'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real', // 3 (total 51)
+          'apert_espacio_prevista', 'apert_espacio_real', 'descripcion', 'obs_generales' // 4 (total 54)
         ];
         
         console.log(`📊 [OBRAS] DEBUG - Columnas definidas: ${columns.length}`);
         
         const insertQuery = `
-          INSERT INTO proyectos_inmobiliarios (${columns.join(', ')}) 
+          INSERT INTO proyectos (${columns.join(', ')}) 
           VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})
           RETURNING id
         `;
         
         // Mapear valores exactamente en el mismo orden que las columnas
         const values = [
+          // Grupo 0: metadatos (1 valor)
+          false, // creado_manualmente - siempre false para registros del Excel
+
           // Grupo 1: datos básicos (7 valores)
           data.mercado || null, 
           data.ciudad || null, 
@@ -550,8 +558,7 @@ class ObrasService {
           data.direccion || null, 
           data.num_local || null, 
           this.excelToInt(data.plantas), 
-          data.tipo || null, 
-          data.estado || null, 
+          data.tipo || null,
           this.excelToNumeric(data.sup_alq),
           
           // Grupo 3: secciones y zonificación (6 valores)
