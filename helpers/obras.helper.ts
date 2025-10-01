@@ -23,38 +23,69 @@ class ObrasService {
     const mappingPath = '/home/osmos/proyectos/svelte-trello/database/tabla equivalencia campos v2.csv';
 
     try {
+      console.log(`📊 [OBRAS] Cargando CSV desde: ${mappingPath}`);
       const csvContent = await fs.readFile(mappingPath, 'utf-8');
+      console.log(`📊 [OBRAS] CSV leído, tamaño: ${csvContent.length} chars`);
+      console.log(`📊 [OBRAS] Primeros 200 chars: ${csvContent.substring(0, 200)}`);
+
+      // Remover BOM si existe
+      const cleanContent = csvContent.replace(/^\uFEFF/, '');
+      console.log(`📊 [OBRAS] Contenido limpio (primeros 200 chars): ${cleanContent.substring(0, 200)}`);
 
       // Usar parseCSV de manera síncrona con el contenido ya leído
       const records = await new Promise((resolve, reject) => {
-        parseCSV(csvContent, {
+        parseCSV(cleanContent, {
           columns: true,
           delimiter: ';',
           skip_empty_lines: true
         }, (err, data) => {
-          if (err) reject(err);
-          else resolve(data);
+          if (err) {
+            console.error(`❌ [OBRAS] Error parseando CSV:`, err);
+            reject(err);
+          } else {
+            console.log(`📊 [OBRAS] CSV parseado, ${data.length} registros encontrados`);
+            console.log(`📊 [OBRAS] Primer registro:`, data[0]);
+            resolve(data);
+          }
         });
       }) as any[];
 
       const mapping = new Map<number, {campo: string, tipo: string}>();
 
       for (const record of records) {
+        console.log(`📊 [OBRAS] Procesando registro:`, record);
         const columnaExcel = parseInt(record['Columna Excel'], 10);
         const campoBD = record['Nombre campo en base datos'];
         const tipoDato = record['Tipo dato'];
 
+        console.log(`📊 [OBRAS] - Columna Excel: "${record['Columna Excel']}" -> ${columnaExcel}`);
+        console.log(`📊 [OBRAS] - Campo BD: "${campoBD}"`);
+        console.log(`📊 [OBRAS] - Tipo dato: "${tipoDato}"`);
+
         if (!isNaN(columnaExcel) && campoBD && tipoDato) {
-          // Limpiar el nombre del campo (quitar la definición SQL)
-          const campoLimpio = campoBD.split(' ')[0]; // 'mercado text NULL,' -> 'mercado'
+          // El campo ya viene limpio en la nueva tabla de equivalencias
           mapping.set(columnaExcel, {
-            campo: campoLimpio,
-            tipo: tipoDato
+            campo: campoBD.trim(), // Solo limpiamos espacios
+            tipo: tipoDato.trim()
           });
+          console.log(`✅ [OBRAS] Mapeado: Columna ${columnaExcel} -> ${campoBD.trim()}`);
+        } else {
+          console.log(`❌ [OBRAS] Registro inválido - columnaExcel: ${columnaExcel}, campoBD: "${campoBD}", tipoDato: "${tipoDato}"`);
         }
       }
 
       console.log(`📊 [OBRAS] Tabla de equivalencias cargada: ${mapping.size} campos mapeados`);
+
+      // Debug: mostrar todos los mapeos cargados CON ESPECIAL ATENCION A COLUMNAS 5 y 6
+      console.log(`📊 [OBRAS] DEBUG - Mapeos cargados:`);
+      for (const [col, field] of mapping.entries()) {
+        if (col === 5 || col === 6) {
+          console.log(`🔥 COLUMNA ${col} -> ${field.campo} (${field.tipo}) ⭐`);
+        } else {
+          console.log(`   Columna ${col} -> ${field.campo} (${field.tipo})`);
+        }
+      }
+
       return mapping;
 
     } catch (error) {
@@ -72,23 +103,33 @@ class ObrasService {
     // Obtener las columnas del Excel como array ordenado
     const columns = Object.keys(excelRow);
 
+    console.log(`📊 [OBRAS] DEBUG mapExcelData - Columnas disponibles: ${columns.length}`);
+    console.log(`📊 [OBRAS] DEBUG mapExcelData - Mapeos a procesar: ${fieldMapping.size}`);
+
     for (const [excelColumn, fieldInfo] of fieldMapping.entries()) {
       // Las columnas en Excel empiezan desde 1, pero en el array desde 0
       const columnIndex = excelColumn - 1;
       const columnKey = columns[columnIndex];
 
+      console.log(`📊 [OBRAS] DEBUG - Procesando columna Excel ${excelColumn} (index ${columnIndex})`);
+      console.log(`   - columnKey: "${columnKey}"`);
+      console.log(`   - fieldInfo.campo: "${fieldInfo.campo}"`);
+
       if (columnKey !== undefined) {
         let value = excelRow[columnKey];
+        // Debug especial para columna 6 (cod_integracion)
+        if (excelColumn === 6) {
+          console.log(`🔍 [OBRAS] COLUMNA 6 DEBUG - columnKey: "${columnKey}", valor RAW: ${JSON.stringify(value)}, tipo: ${typeof value}`);
+        }
 
         // Aplicar conversiones según el tipo de dato
         switch (fieldInfo.tipo) {
           case 'text':
-            if (fieldInfo.campo === 'activo') {
-              // Campo especial: convertir estado a boolean
-              mappedData[fieldInfo.campo] = this.convertEstadoToBool(value);
-            } else {
-              mappedData[fieldInfo.campo] = value || null;
-            }
+            mappedData[fieldInfo.campo] = value || null;
+            break;
+          case 'bool':
+            // Campo boolean: convertir estado
+            mappedData[fieldInfo.campo] = this.convertEstadoToBool(value);
             break;
           case 'int4':
             mappedData[fieldInfo.campo] = this.excelToInt(value);
@@ -108,9 +149,21 @@ class ObrasService {
         }
 
         if (mappedData[fieldInfo.campo] !== undefined) {
-          console.log(`📊 [OBRAS] Mapeo: Columna Excel ${excelColumn} (${columnKey}) -> ${fieldInfo.campo} = ${mappedData[fieldInfo.campo]} (tipo: ${fieldInfo.tipo})`);
+          // Solo mostrar log para campos importantes
+          if (fieldInfo.campo === 'codigo' || fieldInfo.campo === 'cod_integracion') {
+            console.log(`📊 [OBRAS] Mapeo: Columna Excel ${excelColumn} (${columnKey}) -> ${fieldInfo.campo} = ${mappedData[fieldInfo.campo]} (tipo: ${fieldInfo.tipo})`);
+          }
         }
       }
+    }
+
+    // Debug específico para verificar los campos clave
+    console.log(`🔍 [OBRAS] MAPEO FINAL - codigo: ${mappedData.codigo || 'VACÍO'}, cod_integracion: ${mappedData.cod_integracion || 'VACÍO'}`);
+
+    // Debug extra para mostrar TODOS los campos mapeados en el primer registro
+    if (Object.keys(mappedData).length > 0) {
+      const campos = Object.keys(mappedData).slice(0, 6); // Solo primeros 6 campos
+      console.log(`📊 [OBRAS] CAMPOS MAPEADOS (muestra): ${campos.map(c => `${c}=${mappedData[c]}`).join(', ')}`);
     }
 
     return mappedData;
@@ -225,13 +278,10 @@ class ObrasService {
   }
 
   /**
-   * Procesa el archivo Excel y extrae los datos
+   * Procesa el archivo Excel y extrae solo la columna 6 (cod_integracion)
    */
   static async processExcelFile(filePath: string) {
     console.log(`📊 [OBRAS] Procesando archivo Excel: ${filePath}`);
-
-    // Cargar tabla de equivalencias
-    const fieldMapping = await this.loadFieldMapping();
 
     const workbook = XLSX.readFile(filePath);
     console.log(`📊 [OBRAS] Hojas disponibles:`, workbook.SheetNames);
@@ -240,25 +290,9 @@ class ObrasService {
     const worksheet = workbook.Sheets[sheetName];
     console.log(`📊 [OBRAS] Procesando hoja: ${sheetName}`);
 
-    // Primero ver el rango de la hoja
-    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
-    console.log(`📊 [OBRAS] Rango de la hoja: ${worksheet['!ref']}, filas: ${range.e.r + 1}, columnas: ${range.e.c + 1}`);
-
-    // Leer algunas celdas de las primeras filas para ver la estructura
-    console.log(`📊 [OBRAS] Muestra de datos de las primeras filas:`);
-    for (let row = 0; row <= Math.min(5, range.e.r); row++) {
-      const rowData = [];
-      for (let col = 0; col <= Math.min(15, range.e.c); col++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
-        const cell = worksheet[cellAddress];
-        rowData.push(cell ? cell.v : '');
-      }
-      console.log(`📊 [OBRAS] Fila ${row + 1}:`, rowData.slice(0, 10)); // Primeras 10 columnas
-    }
-
-    // Convertir a JSON desde la fila 2 (donde están los datos según la tabla de equivalencias)
+    // Convertir a JSON desde la fila 7 (donde están los datos)
     const rawData = XLSX.utils.sheet_to_json(worksheet, {
-      range: 1, // Fila 2 (índice 1) - datos reales
+      range: 6, // Fila 7 (índice 6) - datos reales
       header: 1, // Usar la primera fila como headers
       defval: null // Valor por defecto para celdas vacías
     });
@@ -267,16 +301,29 @@ class ObrasService {
     if (rawData.length > 0) {
       console.log(`📊 [OBRAS] Primer registro crudo:`, JSON.stringify(rawData[0], null, 2));
       console.log(`📊 [OBRAS] Campos en primer registro:`, Object.keys(rawData[0]));
+
+      // Debug específico para las primeras columnas
+      const columns = Object.keys(rawData[0]);
+      console.log(`📊 [OBRAS] DEBUG - Primeras 10 columnas del Excel:`);
+      for (let i = 0; i < Math.min(10, columns.length); i++) {
+        console.log(`   Columna ${i + 1}: "${columns[i]}" = ${JSON.stringify(rawData[0][columns[i]])}`);
+      }
     }
 
-    // Mapear los datos usando la tabla de equivalencias
+    // Mapear la columna 5 (índice 4, valor 146356) a cod_integracion - HARDCODEADO
     const mappedData = rawData.map((row, index) => {
       try {
-        const mapped = this.mapExcelData(row, fieldMapping);
+        const columns = Object.keys(row);
+        const column5 = columns[4]; // La columna 5 con el código de integración 146356
+        const codIntegracion = row[column5];
+
         if (index < 3) {
-          console.log(`📊 [OBRAS] Registro ${index + 1} mapeado:`, JSON.stringify(mapped, null, 2));
+          console.log(`📊 [OBRAS] Fila ${index + 1}: Columna 5 (${column5}) = ${codIntegracion}`);
         }
-        return mapped;
+
+        return {
+          cod_integracion: this.excelToInt(codIntegracion)
+        };
       } catch (error) {
         console.error(`❌ [OBRAS] Error mapeando fila ${index + 1}:`, error);
         return null;
@@ -401,7 +448,7 @@ class ObrasService {
     try {
       await client.query('BEGIN');
 
-      // Buscar si el proyecto ya existe por cod_integracion
+      // Buscar si el proyecto ya existe por cod_integracion (clave principal)
       const codIntegracion = data.cod_integracion;
 
       if (!codIntegracion) {
@@ -487,7 +534,7 @@ class ObrasService {
               valorNuevo: newValue
             });
 
-            console.log(`🔍 [OBRAS] CAMBIO DETECTADO en cod_integracion ${codIntegracion}, campo ${field}:`);
+            console.log(`🔍 [OBRAS] CAMBIO DETECTADO en codigo ${codigo}, campo ${field}:`);
             console.log(`   oldValue: ${JSON.stringify(oldValue)} -> newValue: ${JSON.stringify(newValue)}`);
           }
         }
@@ -517,7 +564,7 @@ class ObrasService {
             data.inicio_obra_real || null,
             data.apert_espacio_prevista || null,
             data.descripcion || null,
-            codIntegracion
+            codigo
           ];
 
           await client.query(updateQuery, values);
@@ -538,47 +585,27 @@ class ObrasService {
             console.warn(`⚠️ [OBRAS] Error registrando historial de cambios (no crítico): ${historialError.message}`);
           }
 
-          console.log(`📝 [OBRAS] Proyecto actualizado: ${codIntegracion} (${changes.length} cambios)`);
+          console.log(`📝 [OBRAS] Proyecto actualizado: ${codigo} (${changes.length} cambios)`);
           actionResult = { action: 'updated', projectId, changes: changes.length };
         } else {
-          console.log(`📝 [OBRAS] Proyecto sin cambios: ${codIntegracion}`);
+          console.log(`📝 [OBRAS] Proyecto sin cambios: ${codigo}`);
           actionResult = { action: 'no_changes', projectId, changes: 0 };
         }
         
       } else {
-        // Crear nuevo registro con la nueva estructura simplificada
-        const columns = [
-          'creado_manualmente', 'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
-          'nombre_proyecto', 'activo', 'inmueble', 'sup_alq',
-          'bt_solicitud', 'inicio_obra_prevista', 'inicio_obra_real',
-          'apert_espacio_prevista', 'descripcion'
-        ];
-
+        // Crear nuevo registro solo con cod_integracion
         const insertQuery = `
-          INSERT INTO proyectos (${columns.join(', ')})
-          VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})
+          INSERT INTO proyectos (cod_integracion, creado_manualmente)
+          VALUES ($1, $2)
           RETURNING id
         `;
 
         const values = [
-          false, // creado_manualmente - siempre false para registros del Excel
-          data.mercado || null,
-          data.ciudad || null,
-          data.cadena || null,
-          data.codigo || null,
-          codIntegracion,
-          data.nombre_proyecto || null,
-          data.activo !== undefined ? data.activo : true,
-          data.inmueble || null,
-          data.sup_alq || null,
-          data.bt_solicitud || null,
-          data.inicio_obra_prevista || null,
-          data.inicio_obra_real || null,
-          data.apert_espacio_prevista || null,
-          data.descripcion || null
+          data.cod_integracion,
+          false // creado_manualmente - siempre false para registros del Excel
         ];
 
-        console.log(`📊 [OBRAS] DEBUG INSERT - Columnas: ${columns.length}, Values: ${values.length}`);
+        console.log(`📊 [OBRAS] DEBUG INSERT - Values: ${values.length} [${values.join(', ')}]`);
 
         const result = await client.query(insertQuery, values);
         projectId = result.rows[0].id;
@@ -642,7 +669,7 @@ class ObrasService {
         console.log(`📊 [OBRAS] Progreso: ${i + 1}/${data.length} registros procesados`);
       }
       
-      // Validar que tenga cod_integracion válido
+      // Validar que tenga cod_integracion válido (única columna que importamos)
       if (!row.cod_integracion) {
         console.warn(`⚠️ [OBRAS] Fila ${i + 1} sin cod_integracion válido, saltando. Valor: "${row.cod_integracion}"`);
         results.errors++;
@@ -667,7 +694,7 @@ class ObrasService {
         }
         
       } catch (error) {
-        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, cod_integracion ${row.cod_integracion}:`, error);
+        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, codigo ${row.codigo}:`, error);
         console.error(`❌ [OBRAS] Stack trace:`, error.stack);
         results.errors++;
       }
