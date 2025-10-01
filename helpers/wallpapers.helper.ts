@@ -105,11 +105,20 @@ class WallpaperController {
 
       // Validar que el wallpaper existe (si no es null)
       if (wallpaper !== null) {
-        const availableWallpapers = await WallpaperService.getAvailableWallpapers();
-        const wallpaperExists = availableWallpapers.some(w => w.filename === wallpaper);
+        // Verificar si es un gradiente de colores (formato: "#color1 #color2")
+        const isGradient = typeof wallpaper === 'string' &&
+                          wallpaper.includes('#') &&
+                          wallpaper.split(' ').length === 2 &&
+                          wallpaper.split(' ').every(color => /^#[0-9A-Fa-f]{6}$/.test(color));
 
-        if (!wallpaperExists) {
-          return c.json({ error: 'Wallpaper no encontrado' }, 400);
+        if (!isGradient) {
+          // Si no es un gradiente, validar que existe como archivo
+          const availableWallpapers = await WallpaperService.getAvailableWallpapers();
+          const wallpaperExists = availableWallpapers.some(w => w.filename === wallpaper);
+
+          if (!wallpaperExists) {
+            return c.json({ error: 'Wallpaper no encontrado' }, 400);
+          }
         }
       }
 
@@ -119,9 +128,18 @@ class WallpaperController {
         return c.json({ error: 'Tablero no encontrado' }, 404);
       }
 
+      // Determinar el tipo de wallpaper para el mensaje
+      let message = 'Wallpaper eliminado correctamente';
+      if (wallpaper) {
+        const isGradient = typeof wallpaper === 'string' &&
+                          wallpaper.includes('#') &&
+                          wallpaper.split(' ').length === 2;
+        message = isGradient ? 'Gradiente personalizado aplicado correctamente' : 'Wallpaper actualizado correctamente';
+      }
+
       return c.json({
         success: true,
-        message: wallpaper ? 'Wallpaper actualizado correctamente' : 'Wallpaper eliminado correctamente',
+        message,
         wallpaper
       });
     } catch (error: any) {
