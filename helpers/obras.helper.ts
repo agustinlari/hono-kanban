@@ -10,11 +10,125 @@ import type { Variables } from '../types';
 import * as XLSX from 'xlsx';
 import fs from 'fs/promises';
 import path from 'path';
+import { parse as parseCSV } from 'csv-parse';
 
 // ================================
 // Servicio de Obras
 // ================================
 class ObrasService {
+  /**
+   * Carga la tabla de equivalencias desde el archivo CSV
+   */
+  static async loadFieldMapping(): Promise<Map<number, {campo: string, tipo: string}>> {
+    const mappingPath = '/home/osmos/proyectos/svelte-trello/database/tabla equivalencia campos v2.csv';
+
+    try {
+      const csvContent = await fs.readFile(mappingPath, 'utf-8');
+
+      // Usar parseCSV de manera síncrona con el contenido ya leído
+      const records = await new Promise((resolve, reject) => {
+        parseCSV(csvContent, {
+          columns: true,
+          delimiter: ';',
+          skip_empty_lines: true
+        }, (err, data) => {
+          if (err) reject(err);
+          else resolve(data);
+        });
+      }) as any[];
+
+      const mapping = new Map<number, {campo: string, tipo: string}>();
+
+      for (const record of records) {
+        const columnaExcel = parseInt(record['Columna Excel'], 10);
+        const campoBD = record['Nombre campo en base datos'];
+        const tipoDato = record['Tipo dato'];
+
+        if (!isNaN(columnaExcel) && campoBD && tipoDato) {
+          // Limpiar el nombre del campo (quitar la definición SQL)
+          const campoLimpio = campoBD.split(' ')[0]; // 'mercado text NULL,' -> 'mercado'
+          mapping.set(columnaExcel, {
+            campo: campoLimpio,
+            tipo: tipoDato
+          });
+        }
+      }
+
+      console.log(`📊 [OBRAS] Tabla de equivalencias cargada: ${mapping.size} campos mapeados`);
+      return mapping;
+
+    } catch (error) {
+      console.error('❌ [OBRAS] Error cargando tabla de equivalencias:', error);
+      throw new Error(`Error cargando tabla de equivalencias: ${error.message}`);
+    }
+  }
+
+  /**
+   * Mapea los datos del Excel usando la tabla de equivalencias
+   */
+  static mapExcelData(excelRow: any, fieldMapping: Map<number, {campo: string, tipo: string}>): any {
+    const mappedData: any = {};
+
+    // Obtener las columnas del Excel como array ordenado
+    const columns = Object.keys(excelRow);
+
+    for (const [excelColumn, fieldInfo] of fieldMapping.entries()) {
+      // Las columnas en Excel empiezan desde 1, pero en el array desde 0
+      const columnIndex = excelColumn - 1;
+      const columnKey = columns[columnIndex];
+
+      if (columnKey !== undefined) {
+        let value = excelRow[columnKey];
+
+        // Aplicar conversiones según el tipo de dato
+        switch (fieldInfo.tipo) {
+          case 'text':
+            if (fieldInfo.campo === 'activo') {
+              // Campo especial: convertir estado a boolean
+              mappedData[fieldInfo.campo] = this.convertEstadoToBool(value);
+            } else {
+              mappedData[fieldInfo.campo] = value || null;
+            }
+            break;
+          case 'int4':
+            mappedData[fieldInfo.campo] = this.excelToInt(value);
+            break;
+          case 'int8':
+            mappedData[fieldInfo.campo] = this.excelToInt(value);
+            break;
+          case 'numeric(10 2)':
+            mappedData[fieldInfo.campo] = this.excelToNumeric(value);
+            break;
+          case 'date':
+            mappedData[fieldInfo.campo] = this.excelDateToPostgres(value);
+            break;
+          default:
+            mappedData[fieldInfo.campo] = value || null;
+            break;
+        }
+
+        if (mappedData[fieldInfo.campo] !== undefined) {
+          console.log(`📊 [OBRAS] Mapeo: Columna Excel ${excelColumn} (${columnKey}) -> ${fieldInfo.campo} = ${mappedData[fieldInfo.campo]} (tipo: ${fieldInfo.tipo})`);
+        }
+      }
+    }
+
+    return mappedData;
+  }
+
+  /**
+   * Convierte el estado del proyecto a boolean
+   */
+  static convertEstadoToBool(estadoValue: any): boolean {
+    if (!estadoValue) return true; // Por defecto activo
+
+    const estado = String(estadoValue).toLowerCase().trim();
+
+    // Estados que indican que el proyecto está inactivo/cerrado
+    const estadosInactivos = ['cerrado', 'cancelado', 'suspendido', 'terminado', 'finalizado'];
+
+    return !estadosInactivos.includes(estado);
+  }
   /**
    * Ejecuta el scraper C# para descargar un nuevo archivo Excel
    */
@@ -115,57 +229,63 @@ class ObrasService {
    */
   static async processExcelFile(filePath: string) {
     console.log(`📊 [OBRAS] Procesando archivo Excel: ${filePath}`);
-    
+
+    // Cargar tabla de equivalencias
+    const fieldMapping = await this.loadFieldMapping();
+
     const workbook = XLSX.readFile(filePath);
     console.log(`📊 [OBRAS] Hojas disponibles:`, workbook.SheetNames);
-    
+
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     console.log(`📊 [OBRAS] Procesando hoja: ${sheetName}`);
-    
+
     // Primero ver el rango de la hoja
     const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
     console.log(`📊 [OBRAS] Rango de la hoja: ${worksheet['!ref']}, filas: ${range.e.r + 1}, columnas: ${range.e.c + 1}`);
-    
+
     // Leer algunas celdas de las primeras filas para ver la estructura
     console.log(`📊 [OBRAS] Muestra de datos de las primeras filas:`);
-    for (let row = 0; row <= Math.min(10, range.e.r); row++) {
+    for (let row = 0; row <= Math.min(5, range.e.r); row++) {
       const rowData = [];
-      for (let col = 0; col <= Math.min(10, range.e.c); col++) {
+      for (let col = 0; col <= Math.min(15, range.e.c); col++) {
         const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
         const cell = worksheet[cellAddress];
         rowData.push(cell ? cell.v : '');
       }
-      console.log(`📊 [OBRAS] Fila ${row + 1}:`, rowData.slice(0, 5)); // Solo las primeras 5 columnas
+      console.log(`📊 [OBRAS] Fila ${row + 1}:`, rowData.slice(0, 10)); // Primeras 10 columnas
     }
-    
-    // Convertir a JSON desde la fila 7 (saltando la fila 6 que son headers)
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-      range: 6, // Fila 7 (índice 6) - saltar headers que están en la fila 6
-      header: [
-        'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion', 'cod_cont_proy',
-        'proyecto', 'estado_proy', 'inmueble', 'direccion', 'num_local', 'plantas',
-        'tipo', 'estado', 'sup_alq', 'secciones', 'franquicia', 'tipo_proy', 'imagen',
-        'zonificacion_solicitud', 'zonificacion_entrega', 'plano_lic_solicitud',
-        'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega',
-        'aa_solicitud', 'aa_entrega', 'ci_solicitud', 'ci_entrega', 'bt_solicitud',
-        'bt_entrega', 'insp_tecnica_solicitud', 'insp_tecnica_entrega',
-        'lic_obra_solicitud', 'lic_obra_entrega', 'aprob_lic', 'aprob_propietario',
-        'aprob_cc', 'constructora', 'apertura_cc', 'entrega_local_prevista',
-        'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real',
-        'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista',
-        'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real',
-        'apert_espacio_prevista', 'apert_espacio_real', 'desc_proy', 'obs_generales'
-      ]
+
+    // Convertir a JSON desde la fila 2 (donde están los datos según la tabla de equivalencias)
+    const rawData = XLSX.utils.sheet_to_json(worksheet, {
+      range: 1, // Fila 2 (índice 1) - datos reales
+      header: 1, // Usar la primera fila como headers
+      defval: null // Valor por defecto para celdas vacías
     });
-    
-    console.log(`📊 [OBRAS] Datos extraídos: ${jsonData.length} registros`);
-    if (jsonData.length > 0) {
-      console.log(`📊 [OBRAS] Primer registro:`, JSON.stringify(jsonData[0], null, 2));
-      console.log(`📊 [OBRAS] Campos en primer registro:`, Object.keys(jsonData[0]));
+
+    console.log(`📊 [OBRAS] Datos crudos extraídos: ${rawData.length} registros`);
+    if (rawData.length > 0) {
+      console.log(`📊 [OBRAS] Primer registro crudo:`, JSON.stringify(rawData[0], null, 2));
+      console.log(`📊 [OBRAS] Campos en primer registro:`, Object.keys(rawData[0]));
     }
-    
-    return jsonData;
+
+    // Mapear los datos usando la tabla de equivalencias
+    const mappedData = rawData.map((row, index) => {
+      try {
+        const mapped = this.mapExcelData(row, fieldMapping);
+        if (index < 3) {
+          console.log(`📊 [OBRAS] Registro ${index + 1} mapeado:`, JSON.stringify(mapped, null, 2));
+        }
+        return mapped;
+      } catch (error) {
+        console.error(`❌ [OBRAS] Error mapeando fila ${index + 1}:`, error);
+        return null;
+      }
+    }).filter(row => row !== null);
+
+    console.log(`📊 [OBRAS] Datos mapeados: ${mappedData.length} registros válidos`);
+
+    return mappedData;
   }
 
   /**
@@ -277,12 +397,12 @@ class ObrasService {
    */
   static async updateProyecto(data: any, userId: number, results: any) {
     const client = await pool.connect();
-    
+
     try {
       await client.query('BEGIN');
 
-      // Buscar si el proyecto ya existe por cod_integracion (usar la misma conversión que en INSERT)
-      const codIntegracion = this.excelToInt(data.cod_integracion);
+      // Buscar si el proyecto ya existe por cod_integracion
+      const codIntegracion = data.cod_integracion;
 
       if (!codIntegracion) {
         throw new Error(`cod_integracion inválido o vacío: ${data.cod_integracion}`);
@@ -291,7 +411,7 @@ class ObrasService {
       const existingQuery = 'SELECT * FROM proyectos WHERE cod_integracion = $1 AND (creado_manualmente = false OR creado_manualmente IS NULL)';
       const existing = await client.query(existingQuery, [codIntegracion]);
 
-      console.log(`🔍 [OBRAS] Buscando cod_integracion: ${codIntegracion} (original: ${data.cod_integracion})`);
+      console.log(`🔍 [OBRAS] Buscando cod_integracion: ${codIntegracion}`);
       console.log(`📊 [OBRAS] Registros encontrados: ${existing.rows.length}`);
 
       let isUpdate = false;
@@ -302,122 +422,64 @@ class ObrasService {
         // Actualizar registro existente
         isUpdate = true;
         projectId = existing.rows[0].id;
-        
-        // Comparar campos para detectar cambios
+
+        // Comparar campos para detectar cambios - solo campos simplificados
         const oldRecord = existing.rows[0];
         const changes = [];
-        
-        // Lista de campos a comparar (excluyendo id, fecha_cambio, activo)
+
+        // Lista de campos de la nueva tabla simplificada
         const fieldsToCompare = [
-          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_cont_proy', 'nombre_proyecto',
-          'estado', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo',
-          'estado', 'sup_alq', 'secciones', 'franquicia', 'tipo_proy', 'imagen',
-          'zonificacion_solicitud', 'zonificacion_entrega', 'plano_lic_solicitud',
-          'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega',
-          'aa_solicitud', 'aa_entrega', 'ci_solicitud', 'ci_entrega', 'bt_solicitud',
-          'bt_entrega', 'insp_tecnica_solicitud', 'insp_tecnica_entrega',
-          'lic_obra_solicitud', 'lic_obra_entrega', 'aprob_lic', 'aprob_propietario',
-          'aprob_cc', 'constructora', 'apertura_cc', 'entrega_local_prevista',
-          'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real',
-          'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista',
-          'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real',
-          'apert_espacio_prevista', 'apert_espacio_real', 'descripcion', 'obs_generales'
+          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
+          'nombre_proyecto', 'activo', 'inmueble', 'sup_alq',
+          'bt_solicitud', 'inicio_obra_prevista', 'inicio_obra_real',
+          'apert_espacio_prevista', 'descripcion'
         ];
-        
+
         for (const field of fieldsToCompare) {
-          // Mapear nombres de campos del Excel a nombres de BD
-          const excelField = field === 'nombre_proyecto' ? 'proyecto' :
-                             field === 'estado' ? 'estado_proy' :
-                             field === 'descripcion' ? 'desc_proy' : field;
-          let newValue = data[excelField];
+          let newValue = data[field];
           let oldValue = oldRecord[field];
 
-          // Aplicar las mismas conversiones que en el UPDATE
-          if ((field.includes('_solicitud') || field.includes('_entrega') || field.includes('_prevista') || field.includes('_real') || field === 'apertura_cc')
-              && field !== 'zonificacion_solicitud' && field !== 'zonificacion_entrega') {
-            // Campos de fecha (excluyendo zonificacion_* que son text)
-            newValue = this.excelDateToPostgres(newValue);
-            // Convertir oldValue de cualquier formato a string YYYY-MM-DD
-            if (oldValue === null || oldValue === undefined) {
-              oldValue = null;
-            } else if (oldValue instanceof Date) {
-              // Usar fecha local para ser consistente con excelDateToPostgres
+          // Aplicar conversiones según el tipo de campo
+          if (field === 'codigo') {
+            // Campos enteros
+            if (typeof oldValue === 'string') {
+              oldValue = parseInt(oldValue, 10);
+              oldValue = isNaN(oldValue) ? null : oldValue;
+            }
+          } else if (field === 'sup_alq') {
+            // Campo numérico decimal
+            if (typeof oldValue === 'string') {
+              oldValue = parseFloat(oldValue);
+              oldValue = isNaN(oldValue) ? null : oldValue;
+            }
+          } else if (field === 'bt_solicitud' || field === 'inicio_obra_prevista' ||
+                     field === 'inicio_obra_real' || field === 'apert_espacio_prevista') {
+            // Campos de fecha - normalizar a string YYYY-MM-DD
+            if (oldValue instanceof Date) {
               const year = oldValue.getFullYear();
               const month = String(oldValue.getMonth() + 1).padStart(2, '0');
               const day = String(oldValue.getDate()).padStart(2, '0');
               oldValue = `${year}-${month}-${day}`;
-            } else if (typeof oldValue === 'string') {
-              // Si ya es string de fecha, normalizar formato
-              if (oldValue.includes('T')) {
-                oldValue = oldValue.split('T')[0]; // '2025-05-28T10:00:00Z' -> '2025-05-28'
-              } else if (oldValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                oldValue = oldValue; // Ya está en formato correcto '2025-05-28'
-              } else {
-                // Otros formatos de string, intentar parsear
-                const parsed = new Date(oldValue);
-                if (!isNaN(parsed.getTime())) {
-                  // Usar fecha local para ser consistente
-                  const year = parsed.getFullYear();
-                  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-                  const day = String(parsed.getDate()).padStart(2, '0');
-                  oldValue = `${year}-${month}-${day}`;
-                } else {
-                  oldValue = null;
-                }
-              }
-            } else {
-              // Otros tipos de objetos
-              try {
-                const parsed = new Date(oldValue);
-                if (!isNaN(parsed.getTime())) {
-                  // Usar fecha local para ser consistente
-                  const year = parsed.getFullYear();
-                  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-                  const day = String(parsed.getDate()).padStart(2, '0');
-                  oldValue = `${year}-${month}-${day}`;
-                } else {
-                  oldValue = null;
-                }
-              } catch (e) {
-                console.warn(`⚠️ [OBRAS] Error convirtiendo fecha para campo ${field}:`, e.message);
-                oldValue = null;
-              }
+            } else if (typeof oldValue === 'string' && oldValue.includes('T')) {
+              oldValue = oldValue.split('T')[0];
             }
-          } else if (field === 'codigo' || field === 'cod_cont_proy' || field === 'plantas') {
-            // Campos enteros
-            newValue = this.excelToInt(newValue);
-            // Convertir oldValue a number para comparación consistente
-            oldValue = typeof oldValue === 'string' ? parseInt(oldValue, 10) : oldValue;
-            oldValue = isNaN(oldValue) ? null : oldValue;
-          } else if (field === 'sup_alq') {
-            // Campo numérico decimal
-            newValue = this.excelToNumeric(newValue);
-            // Convertir oldValue a number para comparación consistente
-            oldValue = typeof oldValue === 'string' ? parseFloat(oldValue) : oldValue;
-            oldValue = isNaN(oldValue) ? null : oldValue;
           } else {
-            // Campos de texto - normalizar valores nulos/vacíos Y espacios
-
-            // Primero normalizar null/undefined/empty
-            if (newValue === null || newValue === undefined || newValue === '' || newValue === 'null') {
+            // Campos de texto - normalizar valores nulos/vacíos
+            if (newValue === null || newValue === undefined || newValue === '') {
               newValue = null;
             } else {
               newValue = String(newValue).trim();
-              if (newValue === '' || newValue === 'null') newValue = null;
-              // Para el campo secciones, tratar "0" como null para mantener consistencia
-              if (field === 'secciones' && newValue === '0') newValue = null;
+              if (newValue === '') newValue = null;
             }
 
-            if (oldValue === null || oldValue === undefined || oldValue === '' || oldValue === 'null') {
+            if (oldValue === null || oldValue === undefined || oldValue === '') {
               oldValue = null;
             } else {
               oldValue = String(oldValue).trim();
-              if (oldValue === '' || oldValue === 'null') oldValue = null;
-              // Para el campo secciones, tratar "0" como null para mantener consistencia
-              if (field === 'secciones' && oldValue === '0') oldValue = null;
+              if (oldValue === '') oldValue = null;
             }
           }
-          
+
           if (newValue !== oldValue) {
             changes.push({
               campo: field,
@@ -425,62 +487,42 @@ class ObrasService {
               valorNuevo: newValue
             });
 
-            // Debug logging detallado para entender diferencias
             console.log(`🔍 [OBRAS] CAMBIO DETECTADO en cod_integracion ${codIntegracion}, campo ${field}:`);
-            console.log(`   oldValue: ${JSON.stringify(oldValue)} (tipo: ${typeof oldValue})`);
-            console.log(`   newValue: ${JSON.stringify(newValue)} (tipo: ${typeof newValue})`);
-            console.log(`   son iguales: ${oldValue === newValue}, son mismo tipo: ${typeof oldValue === typeof newValue}`);
-
-            // Logging adicional para campos específicos problemáticos
-            if (field.includes('date') || field.includes('fecha') || field.includes('_solicitud') || field.includes('_entrega')) {
-              console.log(`   🗓️ FECHA - oldValue length: ${oldValue?.length}, newValue length: ${newValue?.length}`);
-            }
+            console.log(`   oldValue: ${JSON.stringify(oldValue)} -> newValue: ${JSON.stringify(newValue)}`);
           }
         }
-        
+
         if (changes.length > 0) {
-          // Realizar actualización
+          // Realizar actualización con la nueva estructura
           const updateQuery = `
             UPDATE proyectos SET
-              mercado = $1, ciudad = $2, cadena = $3, codigo = $4, cod_cont_proy = $5,
-              nombre_proyecto = $6, estado = $7, inmueble = $8, direccion = $9, num_local = $10,
-              plantas = $11, tipo = $12, sup_alq = $13, secciones = $14,
-              franquicia = $15, tipo_proy = $16, imagen = $17, zonificacion_solicitud = $18,
-              zonificacion_entrega = $19, plano_lic_solicitud = $20, plano_lic_entrega = $21,
-              plano_obra_solicitud = $22, plano_obra_entrega = $23, aa_solicitud = $24,
-              aa_entrega = $25, ci_solicitud = $26, ci_entrega = $27, bt_solicitud = $28,
-              bt_entrega = $29, insp_tecnica_solicitud = $30, insp_tecnica_entrega = $31,
-              lic_obra_solicitud = $32, lic_obra_entrega = $33, aprob_lic = $34,
-              aprob_propietario = $35, aprob_cc = $36, constructora = $37, apertura_cc = $38,
-              entrega_local_prevista = $39, entrega_local_real = $40, inicio_obra_prevista = $41,
-              inicio_obra_real = $42, aprob_mobiliario_prevista = $43, aprob_mobiliario_real = $44,
-              ent_mobiliario_prevista = $45, ent_mobiliario_real = $46, ent_mercancia_prevista = $47,
-              ent_mercancia_real = $48, apert_espacio_prevista = $49, apert_espacio_real = $50,
-              descripcion = $51, obs_generales = $52, fecha_cambio = CURRENT_TIMESTAMP
-            WHERE cod_integracion = $53
+              mercado = $1, ciudad = $2, cadena = $3, codigo = $4,
+              nombre_proyecto = $5, activo = $6, inmueble = $7, sup_alq = $8,
+              bt_solicitud = $9, inicio_obra_prevista = $10, inicio_obra_real = $11,
+              apert_espacio_prevista = $12, descripcion = $13, fecha_cambio = CURRENT_TIMESTAMP
+            WHERE cod_integracion = $14
           `;
-          
+
           const values = [
-            data.mercado || null, data.ciudad || null, data.cadena || null, this.excelToInt(data.codigo), this.excelToInt(data.cod_cont_proy),
-            data.proyecto || null, data.estado_proy || null, data.inmueble || null, data.direccion || null, data.num_local || null,
-            this.excelToInt(data.plantas), data.tipo || null, this.excelToNumeric(data.sup_alq), data.secciones || null,
-            data.franquicia || null, data.tipo_proy || null, data.imagen || null, data.zonificacion_solicitud || null,
-            data.zonificacion_entrega || null, this.excelDateToPostgres(data.plano_lic_solicitud), this.excelDateToPostgres(data.plano_lic_entrega),
-            this.excelDateToPostgres(data.plano_obra_solicitud), this.excelDateToPostgres(data.plano_obra_entrega), this.excelDateToPostgres(data.aa_solicitud),
-            this.excelDateToPostgres(data.aa_entrega), this.excelDateToPostgres(data.ci_solicitud), this.excelDateToPostgres(data.ci_entrega), this.excelDateToPostgres(data.bt_solicitud),
-            this.excelDateToPostgres(data.bt_entrega), this.excelDateToPostgres(data.insp_tecnica_solicitud), this.excelDateToPostgres(data.insp_tecnica_entrega),
-            this.excelDateToPostgres(data.lic_obra_solicitud), this.excelDateToPostgres(data.lic_obra_entrega), data.aprob_lic || null,
-            data.aprob_propietario || null, data.aprob_cc || null, data.constructora || null, this.excelDateToPostgres(data.apertura_cc),
-            this.excelDateToPostgres(data.entrega_local_prevista), this.excelDateToPostgres(data.entrega_local_real), this.excelDateToPostgres(data.inicio_obra_prevista),
-            this.excelDateToPostgres(data.inicio_obra_real), this.excelDateToPostgres(data.aprob_mobiliario_prevista), this.excelDateToPostgres(data.aprob_mobiliario_real),
-            this.excelDateToPostgres(data.ent_mobiliario_prevista), this.excelDateToPostgres(data.ent_mobiliario_real), this.excelDateToPostgres(data.ent_mercancia_prevista),
-            this.excelDateToPostgres(data.ent_mercancia_real), this.excelDateToPostgres(data.apert_espacio_prevista), this.excelDateToPostgres(data.apert_espacio_real),
-            data.desc_proy || null, data.obs_generales || null, codIntegracion
+            data.mercado || null,
+            data.ciudad || null,
+            data.cadena || null,
+            data.codigo || null,
+            data.nombre_proyecto || null,
+            data.activo !== undefined ? data.activo : true,
+            data.inmueble || null,
+            data.sup_alq || null,
+            data.bt_solicitud || null,
+            data.inicio_obra_prevista || null,
+            data.inicio_obra_real || null,
+            data.apert_espacio_prevista || null,
+            data.descripcion || null,
+            codIntegracion
           ];
-          
+
           await client.query(updateQuery, values);
-          
-          // Registrar cambios en el historial (opcional - no debe fallar la transacción principal)
+
+          // Registrar cambios en el historial
           try {
             for (const change of changes) {
               const historialQuery = `
@@ -494,7 +536,6 @@ class ObrasService {
             console.log(`📝 [OBRAS] Historial de cambios registrado para proyecto: ${projectId}`);
           } catch (historialError) {
             console.warn(`⚠️ [OBRAS] Error registrando historial de cambios (no crítico): ${historialError.message}`);
-            // No relanzar el error - el UPDATE principal debe completarse
           }
 
           console.log(`📝 [OBRAS] Proyecto actualizado: ${codIntegracion} (${changes.length} cambios)`);
@@ -503,146 +544,47 @@ class ObrasService {
           console.log(`📝 [OBRAS] Proyecto sin cambios: ${codIntegracion}`);
           actionResult = { action: 'no_changes', projectId, changes: 0 };
         }
-
-        console.log(`📊 [OBRAS] Comparación completa para ${codIntegracion}: ${changes.length} cambios detectados`);
-
-        // Debug simplificado para registros con cambios
-        if (existing.rows.length > 0 && changes.length > 0) {
-          console.log(`🔍 [OBRAS] cod_integracion ${codIntegracion} tiene ${changes.length} cambios:`);
-          console.log(`   - Cambios:`, changes.map(c => `${c.campo}: "${c.valorAnterior}" → "${c.valorNuevo}"`));
-        }
         
       } else {
-        // Crear nuevo registro  
-        // Contar columnas manualmente para debug:
+        // Crear nuevo registro con la nueva estructura simplificada
         const columns = [
-          'creado_manualmente', // 1 - Marcar como importado del Excel
-          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion', 'cod_cont_proy', 'nombre_proyecto', // 7 (total 8)
-          'estado', 'inmueble', 'direccion', 'num_local', 'plantas', 'tipo', 'sup_alq', // 7 (total 15)
-          'secciones', 'franquicia', 'tipo_proy', 'imagen', 'zonificacion_solicitud', 'zonificacion_entrega', // 6 (total 22)
-          'plano_lic_solicitud', 'plano_lic_entrega', 'plano_obra_solicitud', 'plano_obra_entrega', // 4 (total 26)
-          'aa_solicitud', 'aa_entrega', 'ci_solicitud', 'ci_entrega', 'bt_solicitud', 'bt_entrega', // 6 (total 32)
-          'insp_tecnica_solicitud', 'insp_tecnica_entrega', 'lic_obra_solicitud', 'lic_obra_entrega', // 4 (total 36)
-          'aprob_lic', 'aprob_propietario', 'aprob_cc', 'constructora', 'apertura_cc', // 5 (total 41)
-          'entrega_local_prevista', 'entrega_local_real', 'inicio_obra_prevista', 'inicio_obra_real', // 4 (total 45)
-          'aprob_mobiliario_prevista', 'aprob_mobiliario_real', 'ent_mobiliario_prevista', // 3 (total 48)
-          'ent_mobiliario_real', 'ent_mercancia_prevista', 'ent_mercancia_real', // 3 (total 51)
-          'apert_espacio_prevista', 'apert_espacio_real', 'descripcion', 'obs_generales' // 4 (total 54)
+          'creado_manualmente', 'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
+          'nombre_proyecto', 'activo', 'inmueble', 'sup_alq',
+          'bt_solicitud', 'inicio_obra_prevista', 'inicio_obra_real',
+          'apert_espacio_prevista', 'descripcion'
         ];
-        
-        console.log(`📊 [OBRAS] DEBUG - Columnas definidas: ${columns.length}`);
-        
+
         const insertQuery = `
-          INSERT INTO proyectos (${columns.join(', ')}) 
+          INSERT INTO proyectos (${columns.join(', ')})
           VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})
           RETURNING id
         `;
-        
-        // Mapear valores exactamente en el mismo orden que las columnas
+
         const values = [
-          // Grupo 0: metadatos (1 valor)
           false, // creado_manualmente - siempre false para registros del Excel
-
-          // Grupo 1: datos básicos (7 valores)
-          data.mercado || null, 
-          data.ciudad || null, 
-          data.cadena || null, 
-          this.excelToInt(data.codigo),
-          codIntegracion, // Usar la variable ya calculada
-          this.excelToInt(data.cod_cont_proy), 
-          data.proyecto || null,
-          
-          // Grupo 2: estado y ubicación (8 valores)
-          data.estado_proy || null, 
-          data.inmueble || null, 
-          data.direccion || null, 
-          data.num_local || null, 
-          this.excelToInt(data.plantas), 
-          data.tipo || null,
-          this.excelToNumeric(data.sup_alq),
-          
-          // Grupo 3: secciones y zonificación (6 valores)
-          data.secciones || null, 
-          data.franquicia || null, 
-          data.tipo_proy || null, 
-          data.imagen || null, 
-          data.zonificacion_solicitud || null,
-          data.zonificacion_entrega || null, 
-          
-          // Grupo 4: planos (4 valores)
-          this.excelDateToPostgres(data.plano_lic_solicitud), 
-          this.excelDateToPostgres(data.plano_lic_entrega),
-          this.excelDateToPostgres(data.plano_obra_solicitud), 
-          this.excelDateToPostgres(data.plano_obra_entrega), 
-          
-          // Grupo 5: AA, CI, BT (6 valores)
-          this.excelDateToPostgres(data.aa_solicitud),
-          this.excelDateToPostgres(data.aa_entrega), 
-          this.excelDateToPostgres(data.ci_solicitud), 
-          this.excelDateToPostgres(data.ci_entrega),
-          this.excelDateToPostgres(data.bt_solicitud), 
-          this.excelDateToPostgres(data.bt_entrega), 
-          
-          // Grupo 6: inspecciones y licencias (4 valores)
-          this.excelDateToPostgres(data.insp_tecnica_solicitud),
-          this.excelDateToPostgres(data.insp_tecnica_entrega), 
-          this.excelDateToPostgres(data.lic_obra_solicitud), 
-          this.excelDateToPostgres(data.lic_obra_entrega),
-          
-          // Grupo 7: aprobaciones y constructora (5 valores)
-          data.aprob_lic || null, 
-          data.aprob_propietario || null, 
-          data.aprob_cc || null, 
-          data.constructora || null,
-          this.excelDateToPostgres(data.apertura_cc), 
-          
-          // Grupo 8: entregas e inicios (4 valores)
-          this.excelDateToPostgres(data.entrega_local_prevista), 
-          this.excelDateToPostgres(data.entrega_local_real),
-          this.excelDateToPostgres(data.inicio_obra_prevista), 
-          this.excelDateToPostgres(data.inicio_obra_real), 
-          
-          // Grupo 9: mobiliario (3 valores)
-          this.excelDateToPostgres(data.aprob_mobiliario_prevista),
-          this.excelDateToPostgres(data.aprob_mobiliario_real),
-          this.excelDateToPostgres(data.ent_mobiliario_prevista),
-
-          // Grupo 10: mercancía y espacio (3 valores)
-          this.excelDateToPostgres(data.ent_mobiliario_real),
-          this.excelDateToPostgres(data.ent_mercancia_prevista),
-          this.excelDateToPostgres(data.ent_mercancia_real),
-          
-          // Grupo 11: final (4 valores)
-          this.excelDateToPostgres(data.apert_espacio_prevista),
-          this.excelDateToPostgres(data.apert_espacio_real), 
-          data.desc_proy || null, 
-          data.obs_generales || null
+          data.mercado || null,
+          data.ciudad || null,
+          data.cadena || null,
+          data.codigo || null,
+          codIntegracion,
+          data.nombre_proyecto || null,
+          data.activo !== undefined ? data.activo : true,
+          data.inmueble || null,
+          data.sup_alq || null,
+          data.bt_solicitud || null,
+          data.inicio_obra_prevista || null,
+          data.inicio_obra_real || null,
+          data.apert_espacio_prevista || null,
+          data.descripcion || null
         ];
-        
-        console.log(`📊 [OBRAS] DEBUG INSERT - Columnas definidas: ${columns.length}`);
-        console.log(`📊 [OBRAS] DEBUG INSERT - Values proporcionados: ${values.length}`);
-        
-        // Debug: log any varchar(50) fields that might be too long
-        const varchar50Fields = [
-          { name: 'estado_proy', value: values[7], index: 7 },
-          { name: 'num_local', value: values[11], index: 11 },
-          { name: 'franquicia', value: values[19], index: 19 },
-          { name: 'aprob_lic', value: values[27], index: 27 },
-          { name: 'aprob_propietario', value: values[28], index: 28 },
-          { name: 'aprob_cc', value: values[29], index: 29 }
-        ];
-        
-        varchar50Fields.forEach(field => {
-          if (field.value && String(field.value).length > 50) {
-            console.log(`🚨 [OBRAS] VARCHAR(50) TOO LONG - ${field.name}[${field.index}]: "${String(field.value).substring(0, 60)}..." (length: ${String(field.value).length})`);
-          }
-        });
-        
+
+        console.log(`📊 [OBRAS] DEBUG INSERT - Columnas: ${columns.length}, Values: ${values.length}`);
+
         const result = await client.query(insertQuery, values);
         projectId = result.rows[0].id;
         console.log(`💾 [OBRAS] INSERT exitoso - ID generado: ${projectId} para cod_integracion: ${codIntegracion}`);
-        
-        // Registrar creación en el historial (opcional - no debe fallar la transacción principal)
+
+        // Registrar creación en el historial
         try {
           const historialQuery = `
             INSERT INTO proyectos_historial (proyecto_id, usuario_id, tipo_accion)
@@ -652,7 +594,6 @@ class ObrasService {
           console.log(`📝 [OBRAS] Historial registrado para proyecto: ${projectId}`);
         } catch (historialError) {
           console.warn(`⚠️ [OBRAS] Error registrando historial (no crítico): ${historialError.message}`);
-          // No relanzar el error - el INSERT principal debe completarse
         }
 
         console.log(`✨ [OBRAS] Proyecto creado: ${codIntegracion}`);
@@ -702,15 +643,14 @@ class ObrasService {
       }
       
       // Validar que tenga cod_integracion válido
-      const codIntegracionRow = this.excelToInt(row.cod_integracion);
-      if (!codIntegracionRow) {
-        console.warn(`⚠️ [OBRAS] Fila ${i + 1} sin cod_integracion válido, saltando. Valor original: "${row.cod_integracion}"`);
+      if (!row.cod_integracion) {
+        console.warn(`⚠️ [OBRAS] Fila ${i + 1} sin cod_integracion válido, saltando. Valor: "${row.cod_integracion}"`);
         results.errors++;
         continue;
       }
 
       try {
-        console.log(`📊 [OBRAS] Procesando cod_integracion: ${codIntegracionRow} (original: ${row.cod_integracion})`);
+        console.log(`📊 [OBRAS] Procesando cod_integracion: ${row.cod_integracion}`);
         const result = await this.updateProyecto(row, userId, results);
         results.processed++;
         
@@ -727,7 +667,7 @@ class ObrasService {
         }
         
       } catch (error) {
-        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, cod_integracion ${codIntegracionRow} (original: ${row.cod_integracion}):`, error);
+        console.error(`❌ [OBRAS] Error procesando registro ${i + 1}, cod_integracion ${row.cod_integracion}:`, error);
         console.error(`❌ [OBRAS] Stack trace:`, error.stack);
         results.errors++;
       }

@@ -40,9 +40,9 @@ class BoardService {
         l.id as list_id, l.title as list_title, l.position as list_position,
         c.id as card_id, c.title as card_title, c.description, c.position as card_position,
         c.image_url, c.start_date, c.due_date, c.proyecto_id,
-        p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.estado as proyecto_estado,
+        p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
         p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
-        p.cadena as proyecto_cadena, p.direccion as proyecto_direccion
+        p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
       LEFT JOIN proyectos p ON c.proyecto_id = p.id
@@ -159,11 +159,12 @@ class BoardService {
             id: row.proyecto_id,
             nombre_proyecto: row.nombre_proyecto,
             descripcion: row.proyecto_descripcion,
-            estado: row.proyecto_estado,
+            activo: row.proyecto_activo,
             codigo: row.proyecto_codigo,
             cod_integracion: row.proyecto_cod_integracion,
             cadena: row.proyecto_cadena,
-            direccion: row.proyecto_direccion
+            mercado: row.proyecto_mercado,
+            ciudad: row.proyecto_ciudad
           };
         }
 

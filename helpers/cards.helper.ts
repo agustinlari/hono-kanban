@@ -203,9 +203,9 @@ class CardService {
         SELECT c.*,
                COALESCE(assignees_agg.assignees, '[]') AS assignees,
                COALESCE(labels_agg.labels, '[]') AS labels,
-               p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.estado as proyecto_estado,
+               p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
                p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
-               p.cadena as proyecto_cadena, p.direccion as proyecto_direccion
+               p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad
         FROM cards c
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
         LEFT JOIN (
@@ -259,11 +259,12 @@ class CardService {
           id: fullCard.proyecto_id,
           nombre_proyecto: fullCard.nombre_proyecto,
           descripcion: fullCard.proyecto_descripcion,
-          estado: fullCard.proyecto_estado,
+          activo: fullCard.proyecto_activo,
           codigo: fullCard.proyecto_codigo,
           cod_integracion: fullCard.proyecto_cod_integracion,
           cadena: fullCard.proyecto_cadena,
-          direccion: fullCard.proyecto_direccion
+          mercado: fullCard.proyecto_mercado,
+          ciudad: fullCard.proyecto_ciudad
         };
       }
 
