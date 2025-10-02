@@ -320,7 +320,16 @@ class ObrasService {
         const ciudad = row[columns[1]];         // Índice 1
         const cadena = row[columns[2]];         // Índice 2
         const codigo = row[columns[3]];         // Índice 3
-        const codIntegracion = row[columns[4]]; // Índice 4 - cod_integracion (ya funciona)
+        const codIntegracion = row[columns[4]]; // Índice 4 - cod_integracion
+        const nombreProyecto = row[columns[7]]; // Índice 7
+        const activo = row[columns[8]];         // Índice 8 (corregido)
+        const inmueble = row[columns[9]];       // Índice 9
+        const supAlq = row[columns[15]];        // Índice 15 (corregido)
+        const btSolicitud = row[columns[30]];   // Índice 30 (corregido)
+        const inicioObraPrevista = row[columns[43]]; // Índice 43 (corregido)
+        const inicioObraReal = row[columns[44]];     // Índice 44 (corregido)
+        const apertEspacioPrevista = row[columns[51]]; // Índice 51 (corregido)
+        const descripcion = row[columns[53]];   // Índice 53 (corregido)
 
         // Filtrar filas vacías o sin código de integración válido
         if (!codIntegracion || codIntegracion === "" || codIntegracion === null || codIntegracion === undefined) {
@@ -331,7 +340,15 @@ class ObrasService {
         }
 
         if (index < 3) {
-          console.log(`📊 [OBRAS] Fila ${index + 1}: mercado=${mercado}, ciudad=${ciudad}, cadena=${cadena}, codigo=${codigo}, cod_integracion=${codIntegracion}`);
+          console.log(`📊 [OBRAS] === FILA ${index + 1} - ANÁLISIS COMPLETO ===`);
+          console.log(`📊 [OBRAS] Array completo de la fila:`, Object.values(row).slice(0, 20)); // Primeros 20 valores
+          console.log(`📊 [OBRAS] Campos extraídos:`);
+          console.log(`   [0]mercado=${mercado}, [1]ciudad=${ciudad}, [2]cadena=${cadena}, [3]codigo=${codigo}, [4]cod_integracion=${codIntegracion}`);
+          console.log(`   [7]nombre_proyecto=${nombreProyecto}, [8]activo=${activo}, [9]inmueble=${inmueble}`);
+          console.log(`   [15]sup_alq=${supAlq}, [30]bt_solicitud=${btSolicitud}`);
+          console.log(`   [43]inicio_obra_prevista=${inicioObraPrevista}, [44]inicio_obra_real=${inicioObraReal}`);
+          console.log(`   [51]apert_espacio_prevista=${apertEspacioPrevista}, [53]descripcion=${descripcion}`);
+          console.log(`📊 [OBRAS] ================================`);
         }
 
         return {
@@ -339,7 +356,16 @@ class ObrasService {
           ciudad: ciudad || null,
           cadena: cadena || null,
           codigo: this.excelToInt(codigo),
-          cod_integracion: this.excelToInt(codIntegracion)
+          cod_integracion: this.excelToInt(codIntegracion),
+          nombre_proyecto: nombreProyecto || null,
+          activo: activo || null,
+          inmueble: inmueble || null,
+          sup_alq: supAlq || null,
+          bt_solicitud: btSolicitud || null,
+          inicio_obra_prevista: inicioObraPrevista || null,
+          inicio_obra_real: inicioObraReal || null,
+          apert_espacio_prevista: apertEspacioPrevista || null,
+          descripcion: descripcion || null
         };
       } catch (error) {
         console.error(`❌ [OBRAS] Error mapeando fila ${index + 1}:`, error);
@@ -491,8 +517,12 @@ class ObrasService {
         const oldRecord = existing.rows[0];
         const changes = [];
 
-        // Comparar los campos que ahora importamos
-        const fieldsToCompare = ['mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion'];
+        // Comparar todos los campos que importamos
+        const fieldsToCompare = [
+          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
+          'nombre_proyecto', 'activo', 'inmueble', 'sup_alq', 'bt_solicitud',
+          'inicio_obra_prevista', 'inicio_obra_real', 'apert_espacio_prevista', 'descripcion'
+        ];
 
         for (const field of fieldsToCompare) {
           let newValue = data[field];
@@ -555,9 +585,11 @@ class ObrasService {
           // Realizar actualización con la nueva estructura
           const updateQuery = `
             UPDATE proyectos SET
-              mercado = $1, ciudad = $2, cadena = $3, codigo = $4,
-              cod_integracion = $5, fecha_cambio = CURRENT_TIMESTAMP
-            WHERE cod_integracion = $6
+              mercado = $1, ciudad = $2, cadena = $3, codigo = $4, cod_integracion = $5,
+              nombre_proyecto = $6, activo = $7, inmueble = $8, sup_alq = $9,
+              bt_solicitud = $10, inicio_obra_prevista = $11, inicio_obra_real = $12,
+              apert_espacio_prevista = $13, descripcion = $14, fecha_cambio = CURRENT_TIMESTAMP
+            WHERE cod_integracion = $15
           `;
 
           const values = [
@@ -566,7 +598,16 @@ class ObrasService {
             data.cadena || null,
             data.codigo || null,
             data.cod_integracion,
-            data.cod_integracion
+            data.nombre_proyecto || null,
+            data.activo || null,
+            data.inmueble || null,
+            data.sup_alq || null,
+            data.bt_solicitud || null,
+            data.inicio_obra_prevista || null,
+            data.inicio_obra_real || null,
+            data.apert_espacio_prevista || null,
+            data.descripcion || null,
+            data.cod_integracion // WHERE clause
           ];
 
           await client.query(updateQuery, values);
@@ -597,8 +638,12 @@ class ObrasService {
       } else {
         // Crear nuevo registro con todos los campos
         const insertQuery = `
-          INSERT INTO proyectos (mercado, ciudad, cadena, codigo, cod_integracion, creado_manualmente)
-          VALUES ($1, $2, $3, $4, $5, $6)
+          INSERT INTO proyectos (
+            mercado, ciudad, cadena, codigo, cod_integracion,
+            nombre_proyecto, activo, inmueble, sup_alq, bt_solicitud,
+            inicio_obra_prevista, inicio_obra_real, apert_espacio_prevista, descripcion,
+            creado_manualmente
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           RETURNING id
         `;
 
@@ -608,6 +653,15 @@ class ObrasService {
           data.cadena || null,
           data.codigo || null,
           data.cod_integracion,
+          data.nombre_proyecto || null,
+          data.activo || null,
+          data.inmueble || null,
+          data.sup_alq || null,
+          data.bt_solicitud || null,
+          data.inicio_obra_prevista || null,
+          data.inicio_obra_real || null,
+          data.apert_espacio_prevista || null,
+          data.descripcion || null,
           false // creado_manualmente - siempre false para registros del Excel
         ];
 
