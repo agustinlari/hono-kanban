@@ -53,7 +53,7 @@ class CardService {
       if (newCard.proyecto_id) {
         const projectQuery = `
           SELECT id, nombre_proyecto, descripcion, activo, codigo, cod_integracion, cadena, mercado, ciudad, inmueble,
-                 numero_obra_osmos, inicio_obra_prevista, apert_espacio_prevista
+                 numero_obra_osmos, inicio_obra_prevista, apert_espacio_prevista, es_bim
           FROM proyectos
           WHERE id = $1
         `;
@@ -74,7 +74,8 @@ class CardService {
             inmueble: project.inmueble,
             numero_obra_osmos: project.numero_obra_osmos,
             inicio_obra_prevista: project.inicio_obra_prevista,
-            apert_espacio_prevista: project.apert_espacio_prevista
+            apert_espacio_prevista: project.apert_espacio_prevista,
+            es_bim: project.es_bim
           };
         }
       }
@@ -213,7 +214,7 @@ class CardService {
                p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
                p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
                p.numero_obra_osmos as proyecto_numero_obra_osmos, p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
-               p.apert_espacio_prevista as proyecto_apert_espacio_prevista
+               p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim
         FROM cards c
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
         LEFT JOIN (
@@ -276,7 +277,8 @@ class CardService {
           inmueble: fullCard.proyecto_inmueble,
           numero_obra_osmos: fullCard.proyecto_numero_obra_osmos,
           inicio_obra_prevista: fullCard.proyecto_inicio_obra_prevista,
-          apert_espacio_prevista: fullCard.proyecto_apert_espacio_prevista
+          apert_espacio_prevista: fullCard.proyecto_apert_espacio_prevista,
+          es_bim: fullCard.proyecto_es_bim
         };
       }
 
@@ -417,7 +419,7 @@ class CardService {
       const query = `
         SELECT id, nombre_proyecto, descripcion, activo,
                codigo, cod_integracion, cadena, mercado, ciudad, inmueble,
-               numero_obra_osmos, inicio_obra_prevista, apert_espacio_prevista
+               numero_obra_osmos, inicio_obra_prevista, apert_espacio_prevista, es_bim
         FROM proyectos
         WHERE activo = true
         ORDER BY nombre_proyecto ASC
