@@ -441,7 +441,7 @@ class CardController {
     try {
       const data: CreateCardPayload = await c.req.json();
 
-      if (!data.title || typeof data.title !== 'string' || !data.list_id || typeof data.list_id !== 'number') {
+      if (typeof data.title !== 'string' || !data.list_id || typeof data.list_id !== 'number') {
         return c.json({ error: 'Los campos "title" (string) y "list_id" (number) son requeridos' }, 400);
       }
 
