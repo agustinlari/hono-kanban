@@ -322,7 +322,7 @@ class ObrasService {
         const codigo = row[columns[3]];         // Índice 3
         const codIntegracion = row[columns[4]]; // Índice 4 - cod_integracion
         const nombreProyecto = row[columns[7]]; // Índice 7
-        const activo = row[columns[8]];         // Índice 8 (corregido)
+        const activo = true; // Siempre true si está en el Excel (activo)
         const inmueble = row[columns[9]];       // Índice 9
         const supAlq = row[columns[15]];        // Índice 15 (corregido)
         const btSolicitud = row[columns[30]];   // Índice 30 (corregido)
@@ -361,10 +361,10 @@ class ObrasService {
           activo: activo || null,
           inmueble: inmueble || null,
           sup_alq: supAlq || null,
-          bt_solicitud: btSolicitud || null,
-          inicio_obra_prevista: inicioObraPrevista || null,
-          inicio_obra_real: inicioObraReal || null,
-          apert_espacio_prevista: apertEspacioPrevista || null,
+          bt_solicitud: this.excelToDate(btSolicitud),
+          inicio_obra_prevista: this.excelToDate(inicioObraPrevista),
+          inicio_obra_real: this.excelToDate(inicioObraReal),
+          apert_espacio_prevista: this.excelToDate(apertEspacioPrevista),
           descripcion: descripcion || null
         };
       } catch (error) {
@@ -440,6 +440,54 @@ class ObrasService {
       return isNaN(num) ? null : num;
     }
     
+    return null;
+  }
+
+  /**
+   * Convierte valores de Excel a fecha para campos date
+   */
+  static excelToDate(value: any): string | null {
+    if (value === null || value === undefined || value === '' || value === 'null') return null;
+
+    try {
+      // Si es un número (fecha serial de Excel)
+      if (typeof value === 'number') {
+        // Excel almacena fechas como días desde 1900-01-01 (con ajuste de 1 día)
+        const excelEpoch = new Date(1900, 0, 1); // 1 enero 1900
+        const date = new Date(excelEpoch.getTime() + (value - 2) * 24 * 60 * 60 * 1000);
+
+        // Verificar que sea una fecha válida
+        if (isNaN(date.getTime())) return null;
+
+        // Retornar en formato YYYY-MM-DD para PostgreSQL
+        return date.toISOString().split('T')[0];
+      }
+
+      // Si es string, intentar parsear diferentes formatos
+      if (typeof value === 'string') {
+        const cleaned = value.trim();
+
+        // Lista de valores no válidos para fechas
+        const invalidValues = ['', 'N/A', 'n/a', 'null', 'NULL', '-', '--', 'TBD', 'tbd'];
+        if (invalidValues.includes(cleaned)) return null;
+
+        // Intentar parsear como fecha
+        const date = new Date(cleaned);
+        if (isNaN(date.getTime())) return null;
+
+        return date.toISOString().split('T')[0];
+      }
+
+      // Si es objeto Date
+      if (value instanceof Date) {
+        if (isNaN(value.getTime())) return null;
+        return value.toISOString().split('T')[0];
+      }
+
+    } catch (error) {
+      console.warn(`⚠️ [OBRAS] Error convirtiendo fecha: ${value}`, error);
+    }
+
     return null;
   }
 
@@ -602,10 +650,10 @@ class ObrasService {
             data.activo || null,
             data.inmueble || null,
             data.sup_alq || null,
-            data.bt_solicitud || null,
-            data.inicio_obra_prevista || null,
-            data.inicio_obra_real || null,
-            data.apert_espacio_prevista || null,
+            data.bt_solicitud,
+            data.inicio_obra_prevista,
+            data.inicio_obra_real,
+            data.apert_espacio_prevista,
             data.descripcion || null,
             data.cod_integracion // WHERE clause
           ];
@@ -657,10 +705,10 @@ class ObrasService {
           data.activo || null,
           data.inmueble || null,
           data.sup_alq || null,
-          data.bt_solicitud || null,
-          data.inicio_obra_prevista || null,
-          data.inicio_obra_real || null,
-          data.apert_espacio_prevista || null,
+          data.bt_solicitud,
+          data.inicio_obra_prevista,
+          data.inicio_obra_real,
+          data.apert_espacio_prevista,
           data.descripcion || null,
           false // creado_manualmente - siempre false para registros del Excel
         ];
@@ -759,7 +807,45 @@ class ObrasService {
         results.errors++;
       }
     }
-    
+
+    // Desactivar proyectos que no aparecieron en este Excel
+    try {
+      console.log(`🔄 [OBRAS] Iniciando desactivación de proyectos no presentes en Excel...`);
+
+      // Obtener lista de cod_integracion que aparecieron en este Excel
+      const codIntegracionesEnExcel = mappedData.map(row => row.cod_integracion);
+      console.log(`📊 [OBRAS] Proyectos en Excel: ${codIntegracionesEnExcel.length}`);
+
+      const client = await connectDB();
+
+      // Query para desactivar proyectos que no están en el Excel actual
+      // Solo desactivamos los que no fueron creados manualmente
+      const deactivateQuery = `
+        UPDATE proyectos
+        SET activo = false, fecha_cambio = CURRENT_TIMESTAMP
+        WHERE cod_integracion NOT IN (${codIntegracionesEnExcel.map((_, i) => `$${i + 1}`).join(', ')})
+        AND (creado_manualmente = false OR creado_manualmente IS NULL)
+        AND activo = true
+        RETURNING cod_integracion, mercado, ciudad
+      `;
+
+      const deactivateResult = await client.query(deactivateQuery, codIntegracionesEnExcel);
+      console.log(`📊 [OBRAS] Proyectos desactivados: ${deactivateResult.rows.length}`);
+
+      if (deactivateResult.rows.length > 0) {
+        console.log(`📋 [OBRAS] Proyectos desactivados:`, deactivateResult.rows.slice(0, 5).map(r => `${r.cod_integracion} (${r.mercado})`));
+      }
+
+      // Actualizar resultados
+      results.deactivated = deactivateResult.rows.length;
+
+      await client.end();
+
+    } catch (error) {
+      console.error(`❌ [OBRAS] Error desactivando proyectos no presentes:`, error);
+      results.deactivationErrors = 1;
+    }
+
     console.log(`✅ [OBRAS] Procesamiento completo:`, results);
     return results;
   }
