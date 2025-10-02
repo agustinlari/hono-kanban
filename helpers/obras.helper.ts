@@ -310,12 +310,17 @@ class ObrasService {
       }
     }
 
-    // Mapear la columna 5 (índice 4, valor 146356) a cod_integracion - HARDCODEADO
+    // Mapear las primeras 5 columnas: B,C,D,E,F (índices 1,2,3,4) - HARDCODEADO
     const mappedData = rawData.map((row, index) => {
       try {
         const columns = Object.keys(row);
-        const column5 = columns[4]; // La columna 5 con el código de integración 146356
-        const codIntegracion = row[column5];
+
+        // Extraer valores de las columnas
+        const mercado = row[columns[0]];        // Índice 0
+        const ciudad = row[columns[1]];         // Índice 1
+        const cadena = row[columns[2]];         // Índice 2
+        const codigo = row[columns[3]];         // Índice 3
+        const codIntegracion = row[columns[4]]; // Índice 4 - cod_integracion (ya funciona)
 
         // Filtrar filas vacías o sin código de integración válido
         if (!codIntegracion || codIntegracion === "" || codIntegracion === null || codIntegracion === undefined) {
@@ -326,10 +331,14 @@ class ObrasService {
         }
 
         if (index < 3) {
-          console.log(`📊 [OBRAS] Fila ${index + 1}: Columna 5 (${column5}) = ${codIntegracion}`);
+          console.log(`📊 [OBRAS] Fila ${index + 1}: mercado=${mercado}, ciudad=${ciudad}, cadena=${cadena}, codigo=${codigo}, cod_integracion=${codIntegracion}`);
         }
 
         return {
+          mercado: mercado || null,
+          ciudad: ciudad || null,
+          cadena: cadena || null,
+          codigo: this.excelToInt(codigo),
           cod_integracion: this.excelToInt(codIntegracion)
         };
       } catch (error) {
@@ -482,8 +491,8 @@ class ObrasService {
         const oldRecord = existing.rows[0];
         const changes = [];
 
-        // Solo comparar cod_integracion ya que es lo único que importamos
-        const fieldsToCompare = ['cod_integracion'];
+        // Comparar los campos que ahora importamos
+        const fieldsToCompare = ['mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion'];
 
         for (const field of fieldsToCompare) {
           let newValue = data[field];
@@ -546,11 +555,16 @@ class ObrasService {
           // Realizar actualización con la nueva estructura
           const updateQuery = `
             UPDATE proyectos SET
-              cod_integracion = $1, fecha_cambio = CURRENT_TIMESTAMP
-            WHERE cod_integracion = $2
+              mercado = $1, ciudad = $2, cadena = $3, codigo = $4,
+              cod_integracion = $5, fecha_cambio = CURRENT_TIMESTAMP
+            WHERE cod_integracion = $6
           `;
 
           const values = [
+            data.mercado || null,
+            data.ciudad || null,
+            data.cadena || null,
+            data.codigo || null,
             data.cod_integracion,
             data.cod_integracion
           ];
@@ -581,14 +595,18 @@ class ObrasService {
         }
         
       } else {
-        // Crear nuevo registro solo con cod_integracion
+        // Crear nuevo registro con todos los campos
         const insertQuery = `
-          INSERT INTO proyectos (cod_integracion, creado_manualmente)
-          VALUES ($1, $2)
+          INSERT INTO proyectos (mercado, ciudad, cadena, codigo, cod_integracion, creado_manualmente)
+          VALUES ($1, $2, $3, $4, $5, $6)
           RETURNING id
         `;
 
         const values = [
+          data.mercado || null,
+          data.ciudad || null,
+          data.cadena || null,
+          data.codigo || null,
           data.cod_integracion,
           false // creado_manualmente - siempre false para registros del Excel
         ];
