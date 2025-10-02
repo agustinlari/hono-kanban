@@ -10,7 +10,6 @@ import type { Variables } from '../types';
 import * as XLSX from 'xlsx';
 import fs from 'fs/promises';
 import path from 'path';
-import { parse as parseCSV } from 'csv-parse';
 
 // ================================
 // Servicio de Obras

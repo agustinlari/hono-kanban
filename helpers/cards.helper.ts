@@ -52,7 +52,7 @@ class CardService {
       // Si hay proyecto_id, obtener la información del proyecto
       if (newCard.proyecto_id) {
         const projectQuery = `
-          SELECT id, nombre_proyecto, descripcion, estado, codigo, cod_integracion, cadena, direccion
+          SELECT id, nombre_proyecto, descripcion, activo, codigo, cod_integracion, cadena, mercado, ciudad, inmueble
           FROM proyectos
           WHERE id = $1
         `;
@@ -64,11 +64,13 @@ class CardService {
             id: project.id,
             nombre_proyecto: project.nombre_proyecto,
             descripcion: project.descripcion,
-            estado: project.estado,
+            activo: project.activo,
             codigo: project.codigo,
             cod_integracion: project.cod_integracion,
             cadena: project.cadena,
-            direccion: project.direccion
+            mercado: project.mercado,
+            ciudad: project.ciudad,
+            inmueble: project.inmueble
           };
         }
       }
@@ -205,7 +207,7 @@ class CardService {
                COALESCE(labels_agg.labels, '[]') AS labels,
                p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
                p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
-               p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad
+               p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble
         FROM cards c
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
         LEFT JOIN (
@@ -264,7 +266,8 @@ class CardService {
           cod_integracion: fullCard.proyecto_cod_integracion,
           cadena: fullCard.proyecto_cadena,
           mercado: fullCard.proyecto_mercado,
-          ciudad: fullCard.proyecto_ciudad
+          ciudad: fullCard.proyecto_ciudad,
+          inmueble: fullCard.proyecto_inmueble
         };
       }
 
@@ -403,8 +406,8 @@ class CardService {
     const client = await pool.connect();
     try {
       const query = `
-        SELECT id, nombre_proyecto, descripcion, estado, activo,
-               codigo, cod_integracion, cadena, direccion
+        SELECT id, nombre_proyecto, descripcion, activo,
+               codigo, cod_integracion, cadena, mercado, ciudad, inmueble
         FROM proyectos
         WHERE activo = true
         ORDER BY nombre_proyecto ASC
