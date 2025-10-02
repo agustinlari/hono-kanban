@@ -321,7 +321,7 @@ class ObrasService {
         const cadena = row[columns[2]];         // Índice 2
         const codigo = row[columns[3]];         // Índice 3
         const codIntegracion = row[columns[4]]; // Índice 4 - cod_integracion
-        const nombreProyecto = row[columns[7]]; // Índice 7
+        const nombreProyecto = row[columns[6]]; // Índice 6 (corregido)
         const activo = true; // Siempre true si está en el Excel (activo)
         const inmueble = row[columns[9]];       // Índice 9
         const supAlq = row[columns[15]];        // Índice 15 (corregido)
@@ -333,22 +333,15 @@ class ObrasService {
 
         // Filtrar filas vacías o sin código de integración válido
         if (!codIntegracion || codIntegracion === "" || codIntegracion === null || codIntegracion === undefined) {
-          if (index < 5) {
-            console.log(`⚠️ [OBRAS] Fila ${index + 1}: Saltando fila vacía o sin cod_integracion`);
-          }
+          // Fila vacía, saltar silenciosamente
           return null;
         }
 
-        if (index < 3) {
-          console.log(`📊 [OBRAS] === FILA ${index + 1} - ANÁLISIS COMPLETO ===`);
-          console.log(`📊 [OBRAS] Array completo de la fila:`, Object.values(row).slice(0, 20)); // Primeros 20 valores
-          console.log(`📊 [OBRAS] Campos extraídos:`);
-          console.log(`   [0]mercado=${mercado}, [1]ciudad=${ciudad}, [2]cadena=${cadena}, [3]codigo=${codigo}, [4]cod_integracion=${codIntegracion}`);
-          console.log(`   [7]nombre_proyecto=${nombreProyecto}, [8]activo=${activo}, [9]inmueble=${inmueble}`);
-          console.log(`   [15]sup_alq=${supAlq}, [30]bt_solicitud=${btSolicitud}`);
-          console.log(`   [43]inicio_obra_prevista=${inicioObraPrevista}, [44]inicio_obra_real=${inicioObraReal}`);
-          console.log(`   [51]apert_espacio_prevista=${apertEspacioPrevista}, [53]descripcion=${descripcion}`);
-          console.log(`📊 [OBRAS] ================================`);
+        if (index === 0) {
+          console.log(`📊 [OBRAS] Verificando nombre_proyecto en fila 1:`);
+          console.log(`   Índice [6]: "${row[columns[6]]}" (nombre_proyecto)`);
+          console.log(`   Índice [5]: "${row[columns[5]]}" (referencia)`);
+          console.log(`   Índice [7]: "${row[columns[7]]}" (referencia)`);
         }
 
         return {
