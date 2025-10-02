@@ -474,13 +474,8 @@ class ObrasService {
         const oldRecord = existing.rows[0];
         const changes = [];
 
-        // Lista de campos de la nueva tabla simplificada
-        const fieldsToCompare = [
-          'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
-          'nombre_proyecto', 'activo', 'inmueble', 'sup_alq',
-          'bt_solicitud', 'inicio_obra_prevista', 'inicio_obra_real',
-          'apert_espacio_prevista', 'descripcion'
-        ];
+        // Solo comparar cod_integracion ya que es lo único que importamos
+        const fieldsToCompare = ['cod_integracion'];
 
         for (const field of fieldsToCompare) {
           let newValue = data[field];
@@ -534,7 +529,7 @@ class ObrasService {
               valorNuevo: newValue
             });
 
-            console.log(`🔍 [OBRAS] CAMBIO DETECTADO en codigo ${codigo}, campo ${field}:`);
+            console.log(`🔍 [OBRAS] CAMBIO DETECTADO en cod_integracion ${codIntegracion}, campo ${field}:`);
             console.log(`   oldValue: ${JSON.stringify(oldValue)} -> newValue: ${JSON.stringify(newValue)}`);
           }
         }
@@ -543,28 +538,13 @@ class ObrasService {
           // Realizar actualización con la nueva estructura
           const updateQuery = `
             UPDATE proyectos SET
-              mercado = $1, ciudad = $2, cadena = $3, codigo = $4,
-              nombre_proyecto = $5, activo = $6, inmueble = $7, sup_alq = $8,
-              bt_solicitud = $9, inicio_obra_prevista = $10, inicio_obra_real = $11,
-              apert_espacio_prevista = $12, descripcion = $13, fecha_cambio = CURRENT_TIMESTAMP
-            WHERE cod_integracion = $14
+              cod_integracion = $1, fecha_cambio = CURRENT_TIMESTAMP
+            WHERE cod_integracion = $2
           `;
 
           const values = [
-            data.mercado || null,
-            data.ciudad || null,
-            data.cadena || null,
-            data.codigo || null,
-            data.nombre_proyecto || null,
-            data.activo !== undefined ? data.activo : true,
-            data.inmueble || null,
-            data.sup_alq || null,
-            data.bt_solicitud || null,
-            data.inicio_obra_prevista || null,
-            data.inicio_obra_real || null,
-            data.apert_espacio_prevista || null,
-            data.descripcion || null,
-            codigo
+            data.cod_integracion,
+            data.cod_integracion
           ];
 
           await client.query(updateQuery, values);
@@ -585,10 +565,10 @@ class ObrasService {
             console.warn(`⚠️ [OBRAS] Error registrando historial de cambios (no crítico): ${historialError.message}`);
           }
 
-          console.log(`📝 [OBRAS] Proyecto actualizado: ${codigo} (${changes.length} cambios)`);
+          console.log(`📝 [OBRAS] Proyecto actualizado: ${codIntegracion} (${changes.length} cambios)`);
           actionResult = { action: 'updated', projectId, changes: changes.length };
         } else {
-          console.log(`📝 [OBRAS] Proyecto sin cambios: ${codigo}`);
+          console.log(`📝 [OBRAS] Proyecto sin cambios: ${codIntegracion}`);
           actionResult = { action: 'no_changes', projectId, changes: 0 };
         }
         
