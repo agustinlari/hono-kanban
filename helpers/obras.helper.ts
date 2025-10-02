@@ -317,6 +317,14 @@ class ObrasService {
         const column5 = columns[4]; // La columna 5 con el código de integración 146356
         const codIntegracion = row[column5];
 
+        // Filtrar filas vacías o sin código de integración válido
+        if (!codIntegracion || codIntegracion === "" || codIntegracion === null || codIntegracion === undefined) {
+          if (index < 5) {
+            console.log(`⚠️ [OBRAS] Fila ${index + 1}: Saltando fila vacía o sin cod_integracion`);
+          }
+          return null;
+        }
+
         if (index < 3) {
           console.log(`📊 [OBRAS] Fila ${index + 1}: Columna 5 (${column5}) = ${codIntegracion}`);
         }
