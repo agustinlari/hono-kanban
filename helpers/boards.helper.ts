@@ -42,7 +42,9 @@ class BoardService {
         c.image_url, c.start_date, c.due_date, c.proyecto_id,
         p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
         p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
-        p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad
+        p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
+        p.numero_obra_osmos as proyecto_numero_obra_osmos, p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
+        p.apert_espacio_prevista as proyecto_apert_espacio_prevista
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
       LEFT JOIN proyectos p ON c.proyecto_id = p.id
@@ -164,7 +166,11 @@ class BoardService {
             cod_integracion: row.proyecto_cod_integracion,
             cadena: row.proyecto_cadena,
             mercado: row.proyecto_mercado,
-            ciudad: row.proyecto_ciudad
+            ciudad: row.proyecto_ciudad,
+            inmueble: row.proyecto_inmueble,
+            numero_obra_osmos: row.proyecto_numero_obra_osmos,
+            inicio_obra_prevista: row.proyecto_inicio_obra_prevista,
+            apert_espacio_prevista: row.proyecto_apert_espacio_prevista
           };
         }
 
