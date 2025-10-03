@@ -165,6 +165,43 @@ export class PermissionService {
     console.log(`🏷️ [getBoardIdFromLabel] Resultado: ${boardId}`);
     return boardId;
   }
+
+  /**
+   * Obtiene el board_id desde el checklist_id
+   */
+  static async getBoardIdFromChecklist(checklistId: number): Promise<number | null> {
+    console.log(`📋 [getBoardIdFromChecklist] Buscando board_id para checklist: ${checklistId}`);
+    const query = `
+      SELECT l.board_id
+      FROM card_checklists cc
+      INNER JOIN cards c ON cc.card_id = c.id
+      INNER JOIN lists l ON c.list_id = l.id
+      WHERE cc.id = $1
+    `;
+    const result = await pool.query(query, [checklistId]);
+    const boardId = result.rows[0]?.board_id || null;
+    console.log(`📋 [getBoardIdFromChecklist] Resultado: ${boardId}`);
+    return boardId;
+  }
+
+  /**
+   * Obtiene el board_id desde el checklist_item_id
+   */
+  static async getBoardIdFromChecklistItem(itemId: number): Promise<number | null> {
+    console.log(`📋 [getBoardIdFromChecklistItem] Buscando board_id para item: ${itemId}`);
+    const query = `
+      SELECT l.board_id
+      FROM checklist_items ci
+      INNER JOIN card_checklists cc ON ci.checklist_id = cc.id
+      INNER JOIN cards c ON cc.card_id = c.id
+      INNER JOIN lists l ON c.list_id = l.id
+      WHERE ci.id = $1
+    `;
+    const result = await pool.query(query, [itemId]);
+    const boardId = result.rows[0]?.board_id || null;
+    console.log(`📋 [getBoardIdFromChecklistItem] Resultado: ${boardId}`);
+    return boardId;
+  }
 }
 
 // ================================
@@ -265,9 +302,25 @@ export function requirePermission(action: PermissionAction) {
     }
 
     if (!boardId) {
+      const checklistId = parseInt(c.req.param('checklistId') || '');
+      if (!isNaN(checklistId)) {
+        console.log(`🔍 [requirePermission] checklistId encontrado: ${checklistId}`);
+        boardId = await PermissionService.getBoardIdFromChecklist(checklistId);
+      }
+    }
+
+    if (!boardId) {
+      const itemId = parseInt(c.req.param('itemId') || '');
+      if (!isNaN(itemId)) {
+        console.log(`🔍 [requirePermission] itemId encontrado: ${itemId}`);
+        boardId = await PermissionService.getBoardIdFromChecklistItem(itemId);
+      }
+    }
+
+    if (!boardId) {
       const labelIdParam = c.req.param('labelId') || c.req.param('id') || '';
       console.log(`🔍 [requirePermission] Parametro labelId encontrado: '${labelIdParam}'`);
-      
+
       // Solo intentar parsear como labelId si no es un UUID
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (labelIdParam && !uuidPattern.test(labelIdParam)) {

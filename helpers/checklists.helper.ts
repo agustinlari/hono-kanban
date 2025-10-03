@@ -283,10 +283,10 @@ export const checklistsRoutes = new Hono<{ Variables: Variables }>();
 checklistsRoutes.use('*', keycloakAuthMiddleware);
 
 /**
- * GET /api/cards/:cardId/checklists
+ * GET /cards/:cardId/checklists
  * Obtiene todos los checklists de una tarjeta
  */
-checklistsRoutes.get('/api/cards/:cardId/checklists', requirePermission(PermissionAction.VIEW), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.get('/cards/:cardId/checklists', requirePermission(PermissionAction.VIEW), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -308,10 +308,10 @@ checklistsRoutes.get('/api/cards/:cardId/checklists', requirePermission(Permissi
 });
 
 /**
- * POST /api/cards/:cardId/checklists
+ * POST /cards/:cardId/checklists
  * Crea un nuevo checklist para una tarjeta
  */
-checklistsRoutes.post('/api/cards/:cardId/checklists', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.post('/cards/:cardId/checklists', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -340,10 +340,10 @@ checklistsRoutes.post('/api/cards/:cardId/checklists', requirePermission(Permiss
 });
 
 /**
- * PUT /api/checklists/:checklistId
+ * PUT /checklists/:checklistId
  * Actualiza el título de un checklist
  */
-checklistsRoutes.put('/api/checklists/:checklistId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.put('/checklists/:checklistId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -376,10 +376,10 @@ checklistsRoutes.put('/api/checklists/:checklistId', requirePermission(Permissio
 });
 
 /**
- * DELETE /api/checklists/:checklistId
+ * DELETE /checklists/:checklistId
  * Elimina un checklist
  */
-checklistsRoutes.delete('/api/checklists/:checklistId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.delete('/checklists/:checklistId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -408,10 +408,10 @@ checklistsRoutes.delete('/api/checklists/:checklistId', requirePermission(Permis
 });
 
 /**
- * POST /api/checklists/:checklistId/items
+ * POST /checklists/:checklistId/items
  * Crea un nuevo item en un checklist
  */
-checklistsRoutes.post('/api/checklists/:checklistId/items', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.post('/checklists/:checklistId/items', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -444,10 +444,10 @@ checklistsRoutes.post('/api/checklists/:checklistId/items', requirePermission(Pe
 });
 
 /**
- * PUT /api/checklist-items/:itemId
+ * PUT /checklist-items/:itemId
  * Actualiza un item del checklist
  */
-checklistsRoutes.put('/api/checklist-items/:itemId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.put('/checklist-items/:itemId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -487,10 +487,10 @@ checklistsRoutes.put('/api/checklist-items/:itemId', requirePermission(Permissio
 });
 
 /**
- * DELETE /api/checklist-items/:itemId
+ * DELETE /checklist-items/:itemId
  * Elimina un item del checklist
  */
-checklistsRoutes.delete('/api/checklist-items/:itemId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.delete('/checklist-items/:itemId', requirePermission(PermissionAction.EDIT_CARDS), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
