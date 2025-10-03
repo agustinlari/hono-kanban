@@ -18,6 +18,7 @@ import { assignmentRoutes } from '../helpers/assignments.helper';
 import { keycloakAuthRoutes } from '../helpers/keycloak-auth.helper';
 import { obrasRoutes } from '../helpers/obras.helper';
 import { wallpaperRoutes } from '../helpers/wallpapers.helper';
+import { projectsRoutes } from '../helpers/projects.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -72,3 +73,4 @@ routes.route('/', permissionRoutes);
 routes.route('/', assignmentRoutes);
 routes.route('/', obrasRoutes);
 routes.route('/', wallpaperRoutes);
+routes.route('/', projectsRoutes);
