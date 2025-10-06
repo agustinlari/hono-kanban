@@ -99,7 +99,7 @@ class CardService {
       client.release();
     }
   }
-  static async updateCard(id: string, data: UpdateCardPayload): Promise<Card | null> {
+  static async updateCard(id: string, data: UpdateCardPayload, userId: number): Promise<Card | null> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -208,15 +208,15 @@ class CardService {
           }
 
           // Insertar nuevas asignaciones y crear actividades/notificaciones para nuevos asignados
-          for (const userId of assignees) {
+          for (const assigneeUserId of assignees) {
             await client.query(
               'INSERT INTO card_assignments (card_id, user_id, assigned_by) VALUES ($1, $2, $3)',
-              [id, userId, 1] // TODO: Usar el ID del usuario que está haciendo la asignación
+              [id, assigneeUserId, userId]
             );
 
             // Si es un usuario nuevo (no estaba asignado antes), crear actividad y notificación
-            if (!currentAssignees.includes(userId)) {
-              const userData = usersCheck.rows.find(u => u.id === userId);
+            if (!currentAssignees.includes(assigneeUserId)) {
+              const userData = usersCheck.rows.find(u => u.id === assigneeUserId);
               const assignedUserName = userData?.name || userData?.email || 'Usuario';
               const description = `asignó a ${assignedUserName}`;
 
@@ -225,19 +225,21 @@ class CardService {
                 `INSERT INTO card_activity (card_id, user_id, activity_type, description)
                  VALUES ($1, $2, 'ACTION', $3)
                  RETURNING id`,
-                [id, 1, description] // TODO: Usar el ID del usuario que está haciendo la asignación
+                [id, userId, description]
               );
 
               const activityId = activityResult.rows[0].id;
-              console.log(`✅ [CardService.updateCard] Actividad creada con id=${activityId} para asignación de usuario ${userId}`);
+              console.log(`✅ [CardService.updateCard] Actividad creada con id=${activityId} para asignación de usuario ${assigneeUserId} por usuario ${userId}`);
 
-              // Crear notificación para el usuario asignado
-              try {
-                const { NotificationService } = await import('./notifications.helper');
-                await NotificationService.createNotificationWithClient(client, userId, activityId, description);
-                console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${userId}`);
-              } catch (notifError) {
-                console.error(`❌ [CardService.updateCard] Error creando notificación:`, notifError);
+              // Crear notificación para el usuario asignado (si no es el mismo que asigna)
+              if (assigneeUserId !== userId) {
+                try {
+                  const { NotificationService } = await import('./notifications.helper');
+                  await NotificationService.createNotificationWithClient(client, assigneeUserId, activityId, description);
+                  console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${assigneeUserId}`);
+                } catch (notifError) {
+                  console.error(`❌ [CardService.updateCard] Error creando notificación:`, notifError);
+                }
               }
             }
           }
@@ -554,6 +556,9 @@ class CardController {
   }
     static async update(c: Context) {
     try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
       const id = c.req.param('id');
       const data: UpdateCardPayload = await c.req.json();
 
@@ -561,7 +566,7 @@ class CardController {
         return c.json({ error: 'El cuerpo de la petición no puede estar vacío.' }, 400);
       }
 
-      const updatedCard = await CardService.updateCard(id, data);
+      const updatedCard = await CardService.updateCard(id, data, user.userId);
 
       if (!updatedCard) {
         return c.json({ error: `Tarjeta con ID ${id} no encontrada` }, 404);
