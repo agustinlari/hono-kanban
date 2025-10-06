@@ -16,13 +16,14 @@ import type {
 // ================================
 export class NotificationService {
   /**
-   * Crea una notificación para un usuario
+   * Crea una notificación para un usuario (versión con cliente de transacción)
    */
-  static async createNotification(
+  static async createNotificationWithClient(
+    client: any,
     userId: number,
-    activityId: number
+    activityId: number,
+    activityDescription: string
   ): Promise<void> {
-    const client = await pool.connect();
     try {
       // Verificar que no exista ya una notificación para este usuario y actividad
       const existingCheck = await client.query(
@@ -42,14 +43,7 @@ export class NotificationService {
       `;
       const prefsResult = await client.query(prefsQuery, [userId]);
 
-      // Si no tiene preferencias, crear con valores por defecto
-      if (!prefsResult.rowCount || prefsResult.rowCount === 0) {
-        await client.query(`
-          INSERT INTO user_notification_preferences (user_id)
-          VALUES ($1)
-        `, [userId]);
-      }
-
+      // Si no tiene preferencias, usar valores por defecto
       const prefs = prefsResult.rows[0] || {
         on_mention_in_app: true,
         on_assignment_in_app: true,
@@ -57,32 +51,20 @@ export class NotificationService {
         on_move_in_app: true
       };
 
-      // Obtener información de la actividad para determinar el tipo
-      const activityQuery = `
-        SELECT ca.*, c.title as card_title
-        FROM card_activity ca
-        JOIN cards c ON ca.card_id = c.id
-        WHERE ca.id = $1
-      `;
-      const activityResult = await client.query(activityQuery, [activityId]);
-
-      if (!activityResult.rowCount || activityResult.rowCount === 0) {
-        throw new Error('Actividad no encontrada');
-      }
-
-      const activity = activityResult.rows[0];
-
       // Determinar si crear notificación según preferencias
       let shouldCreate = false;
 
-      if (activity.description.includes(`@user_${userId}`) || activity.description.includes('@')) {
-        shouldCreate = prefs.on_mention_in_app;
-      } else if (activity.description.includes('asignado')) {
-        shouldCreate = prefs.on_assignment_in_app;
-      } else if (activity.activity_type === 'COMMENT') {
-        shouldCreate = prefs.on_comment_in_app;
-      } else if (activity.description.includes('movió') || activity.description.includes('moved')) {
-        shouldCreate = prefs.on_move_in_app;
+      if (activityDescription.includes(`@user_${userId}`) || activityDescription.includes('@')) {
+        shouldCreate = prefs.on_mention_in_app !== false;
+      } else if (activityDescription.includes('asignado') || activityDescription.includes('assigned')) {
+        shouldCreate = prefs.on_assignment_in_app !== false;
+      } else if (activityDescription.includes('comentó') || activityDescription.includes('commented')) {
+        shouldCreate = prefs.on_comment_in_app !== false;
+      } else if (activityDescription.includes('movió') || activityDescription.includes('moved')) {
+        shouldCreate = prefs.on_move_in_app !== false;
+      } else {
+        // Por defecto, crear la notificación
+        shouldCreate = true;
       }
 
       if (!shouldCreate) {
@@ -101,6 +83,98 @@ export class NotificationService {
       console.log(`✅ Notificación creada para user_id=${userId}, activity_id=${activityId}`);
 
     } catch (error) {
+      console.error('Error en NotificationService.createNotificationWithClient:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Crea una notificación para un usuario (versión legacy con pool)
+   */
+  static async createNotification(
+    userId: number,
+    activityId: number
+  ): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar que no exista ya una notificación para este usuario y actividad
+      const existingCheck = await client.query(
+        'SELECT id FROM notifications WHERE user_id = $1 AND activity_id = $2',
+        [userId, activityId]
+      );
+
+      if (existingCheck.rowCount && existingCheck.rowCount > 0) {
+        console.log(`Notificación ya existe para user_id=${userId} y activity_id=${activityId}`);
+        await client.query('COMMIT');
+        return;
+      }
+
+      // Verificar preferencias del usuario
+      const prefsQuery = `
+        SELECT * FROM user_notification_preferences
+        WHERE user_id = $1
+      `;
+      const prefsResult = await client.query(prefsQuery, [userId]);
+
+      // Si no tiene preferencias, usar valores por defecto
+      const prefs = prefsResult.rows[0] || {
+        on_mention_in_app: true,
+        on_assignment_in_app: true,
+        on_comment_in_app: true,
+        on_move_in_app: true
+      };
+
+      // Obtener información de la actividad para determinar el tipo
+      const activityQuery = `
+        SELECT description FROM card_activity WHERE id = $1
+      `;
+      const activityResult = await client.query(activityQuery, [activityId]);
+
+      if (!activityResult.rowCount || activityResult.rowCount === 0) {
+        console.log(`Actividad ${activityId} no encontrada para notificación`);
+        await client.query('COMMIT');
+        return;
+      }
+
+      const activityDescription = activityResult.rows[0].description;
+
+      // Determinar si crear notificación según preferencias
+      let shouldCreate = false;
+
+      if (activityDescription.includes(`@user_${userId}`) || activityDescription.includes('@')) {
+        shouldCreate = prefs.on_mention_in_app !== false;
+      } else if (activityDescription.includes('asignado') || activityDescription.includes('assigned')) {
+        shouldCreate = prefs.on_assignment_in_app !== false;
+      } else if (activityDescription.includes('comentó') || activityDescription.includes('commented')) {
+        shouldCreate = prefs.on_comment_in_app !== false;
+      } else if (activityDescription.includes('movió') || activityDescription.includes('moved')) {
+        shouldCreate = prefs.on_move_in_app !== false;
+      } else {
+        shouldCreate = true;
+      }
+
+      if (!shouldCreate) {
+        console.log(`Usuario ${userId} tiene desactivadas notificaciones para este tipo de actividad`);
+        await client.query('COMMIT');
+        return;
+      }
+
+      // Crear la notificación
+      const insertQuery = `
+        INSERT INTO notifications (user_id, activity_id)
+        VALUES ($1, $2)
+        RETURNING id
+      `;
+
+      await client.query(insertQuery, [userId, activityId]);
+      console.log(`✅ Notificación creada para user_id=${userId}, activity_id=${activityId}`);
+
+      await client.query('COMMIT');
+
+    } catch (error) {
+      await client.query('ROLLBACK');
       console.error('Error en NotificationService.createNotification:', error);
       throw error;
     } finally {

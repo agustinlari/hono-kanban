@@ -85,7 +85,7 @@ export class ActivityService {
         for (const mentionedUserId of mentionedUserIds) {
           if (mentionedUserId !== userId) {
             try {
-              await NotificationService.createNotification(mentionedUserId, activity.id);
+              await NotificationService.createNotificationWithClient(client, mentionedUserId, activity.id, description);
               console.log(`✅ Notificación de mención creada para user_id=${mentionedUserId}`);
             } catch (notifError) {
               console.error(`Error creando notificación para user_id=${mentionedUserId}:`, notifError);
@@ -106,7 +106,7 @@ export class ActivityService {
       // Crear notificaciones para usuarios asignados (excepto el autor del comentario)
       for (const row of assigneesResult.rows) {
         try {
-          await NotificationService.createNotification(row.user_id, activity.id);
+          await NotificationService.createNotificationWithClient(client, row.user_id, activity.id, description);
           console.log(`✅ Notificación de comentario creada para asignado user_id=${row.user_id}`);
         } catch (notifError) {
           console.error(`Error creando notificación para asignado user_id=${row.user_id}:`, notifError);

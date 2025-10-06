@@ -426,12 +426,15 @@ class CardService {
 
       // 4. Registrar actividad solo si la tarjeta cambió de lista
       if (needsActivityLog) {
+        const description = `movió esta tarjeta de "${sourceListTitle}" a "${targetListTitle}"`;
         const activityResult = await client.query(
           `INSERT INTO card_activity (card_id, user_id, activity_type, description)
            VALUES ($1, $2, 'ACTION', $3)
            RETURNING id`,
-          [cardId, userId, `movió esta tarjeta de "${sourceListTitle}" a "${targetListTitle}"`]
+          [cardId, userId, description]
         );
+
+        const activityId = activityResult.rows[0].id;
 
         // Crear notificaciones para usuarios asignados a la tarjeta
         const assigneesQuery = `
@@ -442,14 +445,13 @@ class CardService {
 
         // Importar NotificationService y crear notificaciones
         if (assigneesResult.rows.length > 0) {
-          try {
-            const { NotificationService } = await import('./notifications.helper');
-            for (const row of assigneesResult.rows) {
-              await NotificationService.createNotification(row.user_id, activityResult.rows[0].id);
-              console.log(`✅ Notificación de movimiento creada para user_id=${row.user_id}`);
+          const { NotificationService } = await import('./notifications.helper');
+          for (const row of assigneesResult.rows) {
+            try {
+              await NotificationService.createNotificationWithClient(client, row.user_id, activityId, description);
+            } catch (notifError) {
+              console.error(`Error creando notificación de movimiento para user_id=${row.user_id}:`, notifError);
             }
-          } catch (notifError) {
-            console.error(`Error creando notificaciones de movimiento:`, notifError);
           }
         }
       }

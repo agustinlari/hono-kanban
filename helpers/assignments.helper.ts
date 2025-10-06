@@ -82,19 +82,21 @@ class AssignmentService {
       const assignedUserName = userData.name || userData.email;
 
       // Registrar actividad de asignación
+      const description = `asignó a ${assignedUserName}`;
       const activityResult = await client.query(
         `INSERT INTO card_activity (card_id, user_id, activity_type, description)
          VALUES ($1, $2, 'ACTION', $3)
          RETURNING id`,
-        [cardId, assignedBy, `asignó a ${assignedUserName}`]
+        [cardId, assignedBy, description]
       );
+
+      const activityId = activityResult.rows[0].id;
 
       // Crear notificación para el usuario asignado (si no es el mismo que asigna)
       if (userId !== assignedBy) {
         try {
           const { NotificationService } = await import('./notifications.helper');
-          await NotificationService.createNotification(userId, activityResult.rows[0].id);
-          console.log(`✅ Notificación de asignación creada para user_id=${userId}`);
+          await NotificationService.createNotificationWithClient(client, userId, activityId, description);
         } catch (notifError) {
           console.error(`Error creando notificación de asignación:`, notifError);
         }
