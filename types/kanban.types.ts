@@ -253,3 +253,46 @@ export interface CreateActionPayload {
 export interface ActivitiesResponse {
   activities: CardActivity[];
 }
+
+// ===================================================================
+// TIPOS PARA EL SISTEMA DE NOTIFICACIONES
+// ===================================================================
+
+/**
+ * Tipo de notificación
+ */
+export type NotificationType = 'MENTION' | 'ASSIGNMENT' | 'COMMENT' | 'CARD_MOVE' | 'DUE_DATE_REMINDER';
+
+/**
+ * Interfaz para una notificación
+ */
+export interface Notification {
+  id: number;
+  user_id: number;
+  activity_id: number;
+  read_at: Date | null;
+  created_at: Date;
+  // Datos de la actividad relacionada (cuando se hace JOIN)
+  activity?: CardActivity;
+  card_id?: string;
+  card_title?: string;
+  board_id?: number;
+  board_name?: string;
+  list_title?: string;
+  notification_type?: NotificationType;
+}
+
+/**
+ * Respuesta de la API con notificaciones
+ */
+export interface NotificationsResponse {
+  notifications: Notification[];
+  unread_count: number;
+}
+
+/**
+ * Payload para marcar notificación como leída
+ */
+export interface MarkNotificationReadPayload {
+  notification_id: number;
+}

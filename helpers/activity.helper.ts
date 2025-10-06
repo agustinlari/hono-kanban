@@ -51,7 +51,7 @@ export class ActivityService {
       await client.query('BEGIN');
 
       // Verificar que la tarjeta existe
-      const cardCheck = await client.query('SELECT id FROM cards WHERE id = $1', [cardId]);
+      const cardCheck = await client.query('SELECT id, list_id FROM cards WHERE id = $1', [cardId]);
       if (!cardCheck.rowCount || cardCheck.rowCount === 0) {
         throw new Error('La tarjeta especificada no existe');
       }
@@ -70,6 +70,48 @@ export class ActivityService {
       const userQuery = 'SELECT email, COALESCE(name, email) as name FROM usuarios WHERE id = $1';
       const userResult = await client.query(userQuery, [userId]);
       const userData = userResult.rows[0];
+
+      // === DETECCIÓN DE MENCIONES ===
+      // Importar NotificationService dinámicamente para evitar dependencias circulares
+      const { NotificationService } = await import('./notifications.helper');
+
+      const mentions = NotificationService.extractMentions(description);
+
+      if (mentions.length > 0) {
+        console.log(`🔔 Menciones detectadas: ${mentions.join(', ')}`);
+        const mentionedUserIds = await NotificationService.findUsersByMention(mentions);
+
+        // Crear notificaciones para usuarios mencionados (excepto el autor del comentario)
+        for (const mentionedUserId of mentionedUserIds) {
+          if (mentionedUserId !== userId) {
+            try {
+              await NotificationService.createNotification(mentionedUserId, activity.id);
+              console.log(`✅ Notificación de mención creada para user_id=${mentionedUserId}`);
+            } catch (notifError) {
+              console.error(`Error creando notificación para user_id=${mentionedUserId}:`, notifError);
+              // No fallar la creación del comentario si falla la notificación
+            }
+          }
+        }
+      }
+
+      // === NOTIFICACIONES PARA USUARIOS ASIGNADOS ===
+      // Obtener usuarios asignados a la tarjeta
+      const assigneesQuery = `
+        SELECT user_id FROM card_assignments
+        WHERE card_id = $1 AND user_id != $2
+      `;
+      const assigneesResult = await client.query(assigneesQuery, [cardId, userId]);
+
+      // Crear notificaciones para usuarios asignados (excepto el autor del comentario)
+      for (const row of assigneesResult.rows) {
+        try {
+          await NotificationService.createNotification(row.user_id, activity.id);
+          console.log(`✅ Notificación de comentario creada para asignado user_id=${row.user_id}`);
+        } catch (notifError) {
+          console.error(`Error creando notificación para asignado user_id=${row.user_id}:`, notifError);
+        }
+      }
 
       await client.query('COMMIT');
 
