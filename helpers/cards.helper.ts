@@ -184,7 +184,14 @@ class CardService {
       // Gestionar asignaciones de usuarios si se proporcionaron
       if (assignees !== undefined) {
         console.log('🔍 [CardService.updateCard] Actualizando asignaciones:', assignees);
-        
+
+        // Obtener asignaciones actuales antes de eliminar
+        const currentAssignmentsResult = await client.query(
+          'SELECT user_id FROM card_assignments WHERE card_id = $1',
+          [id]
+        );
+        const currentAssignees = currentAssignmentsResult.rows.map(row => row.user_id);
+
         // Eliminar asignaciones actuales
         await client.query('DELETE FROM card_assignments WHERE card_id = $1', [id]);
 
@@ -192,7 +199,7 @@ class CardService {
         if (assignees.length > 0) {
           // Verificar que todos los usuarios existen
           const usersCheck = await client.query(
-            'SELECT id FROM usuarios WHERE id = ANY($1)',
+            'SELECT id, email, name FROM usuarios WHERE id = ANY($1)',
             [assignees]
           );
 
@@ -200,12 +207,39 @@ class CardService {
             throw new Error('Uno o más usuarios especificados no existen');
           }
 
-          // Insertar nuevas asignaciones
+          // Insertar nuevas asignaciones y crear actividades/notificaciones para nuevos asignados
           for (const userId of assignees) {
             await client.query(
               'INSERT INTO card_assignments (card_id, user_id, assigned_by) VALUES ($1, $2, $3)',
               [id, userId, 1] // TODO: Usar el ID del usuario que está haciendo la asignación
             );
+
+            // Si es un usuario nuevo (no estaba asignado antes), crear actividad y notificación
+            if (!currentAssignees.includes(userId)) {
+              const userData = usersCheck.rows.find(u => u.id === userId);
+              const assignedUserName = userData?.name || userData?.email || 'Usuario';
+              const description = `asignó a ${assignedUserName}`;
+
+              // Crear actividad
+              const activityResult = await client.query(
+                `INSERT INTO card_activity (card_id, user_id, activity_type, description)
+                 VALUES ($1, $2, 'ACTION', $3)
+                 RETURNING id`,
+                [id, 1, description] // TODO: Usar el ID del usuario que está haciendo la asignación
+              );
+
+              const activityId = activityResult.rows[0].id;
+              console.log(`✅ [CardService.updateCard] Actividad creada con id=${activityId} para asignación de usuario ${userId}`);
+
+              // Crear notificación para el usuario asignado
+              try {
+                const { NotificationService } = await import('./notifications.helper');
+                await NotificationService.createNotificationWithClient(client, userId, activityId, description);
+                console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${userId}`);
+              } catch (notifError) {
+                console.error(`❌ [CardService.updateCard] Error creando notificación:`, notifError);
+              }
+            }
           }
         }
 

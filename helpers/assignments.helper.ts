@@ -81,6 +81,8 @@ class AssignmentService {
       const userData = userCheck.rows[0];
       const assignedUserName = userData.name || userData.email;
 
+      console.log(`🎯 [ASSIGNMENT] Asignando usuario ${userId} (${assignedUserName}) a tarjeta ${cardId} por usuario ${assignedBy}`);
+
       // Registrar actividad de asignación
       const description = `asignó a ${assignedUserName}`;
       const activityResult = await client.query(
@@ -91,15 +93,20 @@ class AssignmentService {
       );
 
       const activityId = activityResult.rows[0].id;
+      console.log(`✅ [ASSIGNMENT] Actividad creada con id=${activityId}`);
 
       // Crear notificación para el usuario asignado (si no es el mismo que asigna)
       if (userId !== assignedBy) {
+        console.log(`🔔 [ASSIGNMENT] Creando notificación para usuario ${userId}`);
         try {
           const { NotificationService } = await import('./notifications.helper');
           await NotificationService.createNotificationWithClient(client, userId, activityId, description);
+          console.log(`✅ [ASSIGNMENT] Notificación creada exitosamente`);
         } catch (notifError) {
-          console.error(`Error creando notificación de asignación:`, notifError);
+          console.error(`❌ [ASSIGNMENT] Error creando notificación de asignación:`, notifError);
         }
+      } else {
+        console.log(`⏭️ [ASSIGNMENT] No se crea notificación (usuario se asigna a sí mismo)`);
       }
 
       await client.query('COMMIT');
