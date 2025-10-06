@@ -111,6 +111,73 @@ export class ActivityService {
   }
 
   /**
+   * Actualiza un comentario (solo el autor puede editarlo)
+   */
+  static async updateComment(activityId: number, requestingUserId: number, newDescription: string): Promise<CardActivity> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar que la actividad existe y es un comentario del usuario
+      const activityCheck = await client.query(
+        'SELECT user_id, activity_type, description FROM card_activity WHERE id = $1',
+        [activityId]
+      );
+
+      if (!activityCheck.rowCount || activityCheck.rowCount === 0) {
+        throw new Error('La actividad no existe');
+      }
+
+      const activity = activityCheck.rows[0];
+
+      // Solo se pueden editar comentarios, no acciones automáticas
+      if (activity.activity_type !== 'COMMENT') {
+        throw new Error('No se pueden editar actividades automáticas del sistema');
+      }
+
+      // Solo el autor puede editar su comentario
+      if (activity.user_id !== requestingUserId) {
+        throw new Error('Solo puedes editar tus propios comentarios');
+      }
+
+      const oldDescription = activity.description;
+
+      // Actualizar el comentario agregando el historial como quote
+      const descriptionWithHistory = `${newDescription}\n\n---\n*Editado - Versión anterior:*\n> ${oldDescription.replace(/\n/g, '\n> ')}`;
+
+      const updateQuery = `
+        UPDATE card_activity
+        SET description = $1
+        WHERE id = $2
+        RETURNING id, card_id, user_id, activity_type, description, created_at
+      `;
+
+      const updateResult = await client.query(updateQuery, [descriptionWithHistory, activityId]);
+      const updatedActivity = updateResult.rows[0];
+
+      // Obtener datos del usuario
+      const userQuery = 'SELECT email, COALESCE(name, email) as name FROM usuarios WHERE id = $1';
+      const userResult = await client.query(userQuery, [requestingUserId]);
+      const userData = userResult.rows[0];
+
+      await client.query('COMMIT');
+
+      return {
+        ...updatedActivity,
+        user_email: userData.email,
+        user_name: userData.name
+      } as CardActivity;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en ActivityService.updateComment:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Elimina un comentario (solo el autor puede eliminarlo)
    */
   static async deleteActivity(activityId: number, requestingUserId: number): Promise<boolean> {
@@ -218,6 +285,45 @@ class ActivityController {
   }
 
   /**
+   * PUT /activities/:activityId - Actualizar un comentario
+   */
+  static async updateActivity(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const activityId = parseInt(c.req.param('activityId'));
+
+    if (isNaN(activityId)) {
+      return c.json({ error: 'ID de actividad inválido' }, 400);
+    }
+
+    try {
+      const { description } = await c.req.json();
+
+      if (!description || typeof description !== 'string' || description.trim().length === 0) {
+        return c.json({ error: 'La descripción del comentario es requerida' }, 400);
+      }
+
+      const updatedActivity = await ActivityService.updateComment(activityId, user.userId, description.trim());
+
+      return c.json({
+        message: 'Comentario actualizado exitosamente',
+        activity: updatedActivity
+      });
+    } catch (error: any) {
+      console.error(`Error actualizando actividad ${activityId}:`, error);
+
+      if (error.message.includes('no existe') ||
+          error.message.includes('no se pueden editar') ||
+          error.message.includes('Solo puedes')) {
+        return c.json({ error: error.message }, 400);
+      }
+
+      return c.json({ error: 'Error interno del servidor' }, 500);
+    }
+  }
+
+  /**
    * DELETE /activities/:activityId - Eliminar un comentario
    */
   static async deleteActivity(c: Context) {
@@ -260,4 +366,5 @@ export const activityRoutes = new Hono<{ Variables: Variables }>();
 // Rutas para gestionar actividades de tarjetas
 activityRoutes.get('/cards/:cardId/activities', keycloakAuthMiddleware, ActivityController.getCardActivities);
 activityRoutes.post('/cards/:cardId/activities', keycloakAuthMiddleware, requirePermission(PermissionAction.VIEW_BOARD), ActivityController.createComment);
+activityRoutes.put('/activities/:activityId', keycloakAuthMiddleware, ActivityController.updateActivity);
 activityRoutes.delete('/activities/:activityId', keycloakAuthMiddleware, ActivityController.deleteActivity);
