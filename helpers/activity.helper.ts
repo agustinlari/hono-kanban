@@ -131,8 +131,30 @@ export class ActivityService {
   }
 
   /**
+   * Crea una actividad automática usando un cliente de transacción existente
+   * Usar esta versión cuando ya estés dentro de una transacción
+   */
+  static async createActionWithClient(client: any, cardId: string, userId: number | null, description: string): Promise<number> {
+    try {
+      const insertQuery = `
+        INSERT INTO card_activity (card_id, user_id, activity_type, description)
+        VALUES ($1, $2, 'ACTION', $3)
+        RETURNING id
+      `;
+
+      const result = await client.query(insertQuery, [cardId, userId, description]);
+      return result.rows[0].id;
+
+    } catch (error) {
+      console.error('Error en ActivityService.createActionWithClient:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Crea una actividad automática (acción del sistema)
    * Esta función es para uso interno, no expuesta a través de la API
+   * NOTA: Abre su propia conexión, usar createActionWithClient si ya estás en una transacción
    */
   static async createAction(cardId: string, userId: number | null, description: string): Promise<void> {
     const client = await pool.connect();

@@ -50,7 +50,8 @@ class CardService {
       const newCard = result.rows[0];
 
       // 4. Registrar actividad de creación
-      await ActivityService.createAction(
+      await ActivityService.createActionWithClient(
+        client,
         newCard.id,
         userId,
         `creó esta tarjeta en "${listTitle}"`

@@ -325,6 +325,28 @@ class BoardService {
       client.release();
     }
   }
+
+  /**
+   * Obtiene todos los usuarios que tienen acceso a un board específico
+   */
+  static async getBoardUsers(boardId: number): Promise<Array<{id: number, email: string, name: string}>> {
+    try {
+      // Obtener usuarios miembros del board
+      const query = `
+        SELECT DISTINCT u.id, u.email, COALESCE(u.name, u.email) as name
+        FROM usuarios u
+        INNER JOIN board_members bm ON u.id = bm.user_id
+        WHERE bm.board_id = $1 AND bm.can_view = true
+        ORDER BY name ASC
+      `;
+
+      const result = await pool.query(query, [boardId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error en BoardService.getBoardUsers:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -419,6 +441,28 @@ class BoardController {
       return c.json({ error: 'No se pudo eliminar el tablero' }, 500);
     }
   }
+
+  /**
+   * Obtiene todos los usuarios con acceso a un board específico
+   */
+  static async getBoardUsers(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const boardId = parseInt(c.req.param('id'));
+      if (isNaN(boardId)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      const users = await BoardService.getBoardUsers(boardId);
+      return c.json({ users });
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.getBoardUsers para board ${c.req.param('id')}:`, error);
+      return c.json({ error: 'No se pudieron obtener los usuarios del board' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -433,5 +477,6 @@ boardRoutes.get('/boards/:id', requireBoardAccess(), BoardController.getOne);
 boardRoutes.post('/boards', BoardController.create);
 boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
 boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);
+boardRoutes.get('/boards/:id/users', requireBoardAccess(), BoardController.getBoardUsers);
 
 export { BoardController };
