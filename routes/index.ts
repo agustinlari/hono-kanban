@@ -20,6 +20,7 @@ import { obrasRoutes } from '../helpers/obras.helper';
 import { wallpaperRoutes } from '../helpers/wallpapers.helper';
 import { projectsRoutes } from '../helpers/projects.helper';
 import { checklistsRoutes } from '../helpers/checklists.helper';
+import { activityRoutes } from '../helpers/activity.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -76,3 +77,4 @@ routes.route('/', obrasRoutes);
 routes.route('/', wallpaperRoutes);
 routes.route('/', projectsRoutes);
 routes.route('/', checklistsRoutes);
+routes.route('/', activityRoutes);

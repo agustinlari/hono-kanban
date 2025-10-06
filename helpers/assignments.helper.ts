@@ -8,6 +8,7 @@ import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
 import type { CardAssignee, AssignUserPayload, UnassignUserPayload, AssignmentResponse } from '../types/kanban.types';
+import { ActivityService } from './activity.helper';
 
 // ================================
 // Lógica de Servicio (AssignmentService)
@@ -76,10 +77,19 @@ class AssignmentService {
       const insertResult = await client.query(insertQuery, [cardId, userId, assignedBy]);
       const assignment = insertResult.rows[0];
 
-      await client.query('COMMIT');
-
       // Retornar la asignación completa con datos del usuario
       const userData = userCheck.rows[0];
+      const assignedUserName = userData.name || userData.email;
+
+      // Registrar actividad de asignación
+      await ActivityService.createAction(
+        cardId,
+        assignedBy,
+        `asignó a ${assignedUserName}`
+      );
+
+      await client.query('COMMIT');
+
       return {
         id: assignment.id,
         card_id: cardId,
@@ -107,9 +117,12 @@ class AssignmentService {
     try {
       await client.query('BEGIN');
 
-      // Verificar que la asignación existe
+      // Verificar que la asignación existe y obtener datos del usuario
       const assignmentCheck = await client.query(
-        'SELECT id FROM card_assignments WHERE card_id = $1 AND user_id = $2',
+        `SELECT ca.id, u.name, u.email
+         FROM card_assignments ca
+         JOIN usuarios u ON ca.user_id = u.id
+         WHERE ca.card_id = $1 AND ca.user_id = $2`,
         [cardId, userId]
       );
 
@@ -117,14 +130,24 @@ class AssignmentService {
         throw new Error('El usuario no está asignado a esta tarjeta');
       }
 
+      const userData = assignmentCheck.rows[0];
+      const unassignedUserName = userData.name || userData.email;
+
       // Eliminar la asignación
       const deleteResult = await client.query(
         'DELETE FROM card_assignments WHERE card_id = $1 AND user_id = $2',
         [cardId, userId]
       );
 
+      // Registrar actividad de desasignación
+      await ActivityService.createAction(
+        cardId,
+        requestingUserId,
+        `eliminó a ${unassignedUserName}`
+      );
+
       await client.query('COMMIT');
-      
+
       return deleteResult.rowCount !== null && deleteResult.rowCount > 0;
 
     } catch (error) {

@@ -9,6 +9,7 @@ import type { Variables } from '../types';
 import { PermissionAction } from '../types';
 import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload } from '../types/kanban.types';
 import { validateDates, formatDateForDB, parseDate } from '../utils/dateUtils';
+import { ActivityService } from './activity.helper';
 
 // ================================
 // Lógica de Servicio (CardService)
@@ -18,7 +19,7 @@ class CardService {
    * Crea una nueva tarjeta en una lista específica.
    * Calcula automáticamente la posición para que se añada al final.
    */
-  static async createCard(data: CreateCardPayload): Promise<Card> {
+  static async createCard(data: CreateCardPayload, userId: number): Promise<Card> {
     const { title, list_id, proyecto_id } = data;
 
     const client = await pool.connect();
@@ -26,10 +27,11 @@ class CardService {
       await client.query('BEGIN');
 
       // 1. Comprobar si la lista existe.
-      const listCheck = await client.query('SELECT id FROM lists WHERE id = $1', [list_id]);
+      const listCheck = await client.query('SELECT id, title FROM lists WHERE id = $1', [list_id]);
       if (listCheck.rowCount === 0) {
         throw new Error('La lista especificada no existe.');
       }
+      const listTitle = listCheck.rows[0].title;
 
       // 2. Calcular la nueva posición de la tarjeta dentro de esa lista.
       const positionResult = await client.query(
@@ -45,9 +47,16 @@ class CardService {
       `;
       const result = await client.query(query, [title, list_id, newPosition, proyecto_id || null]);
 
-      await client.query('COMMIT');
-
       const newCard = result.rows[0];
+
+      // 4. Registrar actividad de creación
+      await ActivityService.createAction(
+        newCard.id,
+        userId,
+        `creó esta tarjeta en "${listTitle}"`
+      );
+
+      await client.query('COMMIT');
 
       // Si hay proyecto_id, obtener la información del proyecto
       if (newCard.proyecto_id) {
@@ -59,7 +68,7 @@ class CardService {
         `;
         const projectResult = await client.query(projectQuery, [newCard.proyecto_id]);
 
-        if (projectResult.rowCount > 0) {
+        if (projectResult.rowCount && projectResult.rowCount > 0) {
           const project = projectResult.rows[0];
           newCard.proyecto = {
             id: project.id,
@@ -337,7 +346,7 @@ class CardService {
     }
   }
 
-  static async moveCard(data: MoveCardPayload): Promise<void> {
+  static async moveCard(data: MoveCardPayload, userId: number): Promise<void> {
     const { cardId, sourceListId, targetListId, newIndex } = data;
 
     const client = await pool.connect();
@@ -350,6 +359,22 @@ class CardService {
         throw new Error('La tarjeta a mover no existe.');
       }
       const originalIndex = cardResult.rows[0].position;
+
+      // Obtener nombres de las listas para el registro de actividad
+      let sourceListTitle = '';
+      let targetListTitle = '';
+      const needsActivityLog = sourceListId !== targetListId;
+
+      if (needsActivityLog) {
+        const listsQuery = `
+          SELECT id, title FROM lists WHERE id = ANY($1)
+        `;
+        const listsResult = await client.query(listsQuery, [[sourceListId, targetListId]]);
+        const sourceList = listsResult.rows.find((l: any) => l.id === sourceListId);
+        const targetList = listsResult.rows.find((l: any) => l.id === targetListId);
+        sourceListTitle = sourceList?.title || 'Lista origen';
+        targetListTitle = targetList?.title || 'Lista destino';
+      }
 
       // CASO A: Mover dentro de la misma lista
       if (sourceListId === targetListId) {
@@ -399,6 +424,15 @@ class CardService {
         [targetListId, newIndex, cardId]
       );
 
+      // 4. Registrar actividad solo si la tarjeta cambió de lista
+      if (needsActivityLog) {
+        await ActivityService.createAction(
+          cardId,
+          userId,
+          `movió esta tarjeta de "${sourceListTitle}" a "${targetListTitle}"`
+        );
+      }
+
       await client.query('COMMIT');
 
     } catch (error) {
@@ -441,13 +475,16 @@ class CardService {
 class CardController {
   static async create(c: Context) {
     try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
       const data: CreateCardPayload = await c.req.json();
 
       if (typeof data.title !== 'string' || !data.list_id || typeof data.list_id !== 'number') {
         return c.json({ error: 'Los campos "title" (string) y "list_id" (number) son requeridos' }, 400);
       }
 
-      const newCard = await CardService.createCard(data);
+      const newCard = await CardService.createCard(data, user.userId);
       return c.json(newCard, 201);
 
     } catch (error: any) {
@@ -502,6 +539,9 @@ class CardController {
   }
   static async move(c: Context) {
     try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
       const data: MoveCardPayload = await c.req.json();
 
       // DEBUG: Agregar logging para ver qué datos se están recibiendo
@@ -547,7 +587,7 @@ class CardController {
 
       console.log('✅ Datos procesados para CardService.moveCard:', moveData);
 
-      await CardService.moveCard(moveData);
+      await CardService.moveCard(moveData, user.userId);
 
       console.log('✅ Tarjeta movida exitosamente');
 

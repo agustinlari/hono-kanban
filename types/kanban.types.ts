@@ -205,3 +205,51 @@ export interface AssignmentResponse {
   message: string;
   assignment?: CardAssignee;
 }
+
+// ===================================================================
+// TIPOS PARA EL SISTEMA DE ACTIVIDADES Y MENSAJES
+// ===================================================================
+
+/**
+ * Tipo de actividad en una tarjeta
+ */
+export type ActivityType = 'ACTION' | 'COMMENT';
+
+/**
+ * Interfaz para una actividad de tarjeta
+ */
+export interface CardActivity {
+  id: number;
+  card_id: string;
+  user_id: number | null;
+  activity_type: ActivityType;
+  description: string;
+  created_at: Date;
+  // Información del usuario (cuando se hace JOIN)
+  user_email?: string;
+  user_name?: string;
+}
+
+/**
+ * Payload para crear una actividad/comentario manual
+ */
+export interface CreateActivityPayload {
+  card_id: string;
+  description: string;
+}
+
+/**
+ * Payload para crear una actividad automática (interna)
+ */
+export interface CreateActionPayload {
+  card_id: string;
+  user_id: number | null;
+  description: string;
+}
+
+/**
+ * Respuesta de la API con actividades
+ */
+export interface ActivitiesResponse {
+  activities: CardActivity[];
+}
