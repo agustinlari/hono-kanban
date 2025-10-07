@@ -9,6 +9,7 @@ import type { Variables } from '../types';
 import { PermissionAction } from '../types';
 import type { CardAssignee, AssignUserPayload, UnassignUserPayload, AssignmentResponse } from '../types/kanban.types';
 import { ActivityService } from './activity.helper';
+import { SSEService } from './sse.helper';
 
 // ================================
 // Lógica de Servicio (AssignmentService)
@@ -111,7 +112,7 @@ class AssignmentService {
 
       await client.query('COMMIT');
 
-      return {
+      const assigneeData = {
         id: assignment.id,
         card_id: cardId,
         user_id: userId,
@@ -120,6 +121,34 @@ class AssignmentService {
         assigned_by: assignedBy,
         assigned_at: assignment.assigned_at
       };
+
+      // Emitir evento SSE para actualizar la tarjeta en todos los clientes
+      try {
+        // Obtener el boardId de la tarjeta
+        const boardQuery = await pool.query(`
+          SELECT l.board_id, c.*
+          FROM cards c
+          JOIN lists l ON c.list_id = l.id
+          WHERE c.id = $1
+        `, [cardId]);
+
+        if (boardQuery.rowCount && boardQuery.rowCount > 0) {
+          const boardId = boardQuery.rows[0].board_id;
+          const card = boardQuery.rows[0];
+
+          console.log(`📡 [SSE] Emitiendo evento card:updated para board ${boardId}`);
+          await SSEService.emitBoardEvent({
+            type: 'card:updated',
+            boardId: boardId,
+            data: { card }
+          });
+        }
+      } catch (sseError) {
+        console.error('❌ Error emitiendo evento SSE de asignación:', sseError);
+        // No fallar la operación si SSE falla
+      }
+
+      return assigneeData;
 
     } catch (error) {
       await client.query('ROLLBACK');
@@ -169,7 +198,37 @@ class AssignmentService {
 
       await client.query('COMMIT');
 
-      return deleteResult.rowCount !== null && deleteResult.rowCount > 0;
+      const success = deleteResult.rowCount !== null && deleteResult.rowCount > 0;
+
+      // Emitir evento SSE para actualizar la tarjeta en todos los clientes
+      if (success) {
+        try {
+          // Obtener el boardId de la tarjeta
+          const boardQuery = await pool.query(`
+            SELECT l.board_id, c.*
+            FROM cards c
+            JOIN lists l ON c.list_id = l.id
+            WHERE c.id = $1
+          `, [cardId]);
+
+          if (boardQuery.rowCount && boardQuery.rowCount > 0) {
+            const boardId = boardQuery.rows[0].board_id;
+            const card = boardQuery.rows[0];
+
+            console.log(`📡 [SSE] Emitiendo evento card:updated para board ${boardId} (desasignación)`);
+            await SSEService.emitBoardEvent({
+              type: 'card:updated',
+              boardId: boardId,
+              data: { card }
+            });
+          }
+        } catch (sseError) {
+          console.error('❌ Error emitiendo evento SSE de desasignación:', sseError);
+          // No fallar la operación si SSE falla
+        }
+      }
+
+      return success;
 
     } catch (error) {
       await client.query('ROLLBACK');
