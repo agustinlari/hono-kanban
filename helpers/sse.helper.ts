@@ -44,6 +44,9 @@ export interface SSEClient {
   userEmail: string;
   controller: any; // StreamingAPI de Hono
   boardIds: Set<number>; // Tableros que el usuario está viendo actualmente
+  tokenExp: number; // Token expiration timestamp (epoch seconds)
+  createdAt: number; // Connection creation timestamp
+  aborted: boolean; // Flag para indicar si la conexión ha sido abortada
 }
 
 // ================================
@@ -61,13 +64,60 @@ export class SSEService {
   }
 
   /**
+   * Cierra una conexión de cliente de forma segura
+   */
+  private static closeClient(client: SSEClient): void {
+    if (!client.aborted) {
+      try {
+        // Intentar cerrar el stream si es posible
+        if (client.controller && typeof client.controller.close === 'function') {
+          client.controller.close();
+        }
+      } catch (error) {
+        console.error(`Error cerrando stream del cliente ${client.id}:`, error);
+      }
+      client.aborted = true;
+    }
+  }
+
+  /**
+   * Cierra todas las conexiones antiguas de un usuario antes de registrar una nueva
+   */
+  private static closeOldConnectionsForUser(userId: number, userEmail: string): void {
+    const oldConnections: string[] = [];
+
+    for (const [clientId, client] of this.clients.entries()) {
+      if (client.userId === userId) {
+        oldConnections.push(clientId);
+      }
+    }
+
+    if (oldConnections.length > 0) {
+      console.log(`🔄 Cerrando ${oldConnections.length} conexiones antiguas para usuario ${userEmail}`);
+      for (const clientId of oldConnections) {
+        const client = this.clients.get(clientId);
+        if (client) {
+          this.closeClient(client);
+          this.unregisterClient(clientId);
+        }
+      }
+    }
+  }
+
+  /**
    * Registra un nuevo cliente SSE
+   * Cierra conexiones antiguas del mismo usuario automáticamente
    */
   static registerClient(
     userId: number,
     userEmail: string,
-    controller: any
+    controller: any,
+    tokenExp: number
   ): string {
+    // PASO 1: Cerrar conexiones antiguas del mismo usuario
+    this.closeOldConnectionsForUser(userId, userEmail);
+
+    // PASO 2: Crear nuevo cliente
     const clientId = this.generateClientId();
 
     const client: SSEClient = {
@@ -75,11 +125,14 @@ export class SSEService {
       userId,
       userEmail,
       controller,
-      boardIds: new Set()
+      boardIds: new Set(),
+      tokenExp,
+      createdAt: Date.now(),
+      aborted: false
     };
 
     this.clients.set(clientId, client);
-    console.log(`✅ Cliente SSE registrado: ${clientId} (user: ${userEmail}, total clientes: ${this.clients.size})`);
+    console.log(`✅ Cliente SSE registrado: ${clientId} (user: ${userEmail}, token exp: ${new Date(tokenExp * 1000).toISOString()}, total clientes: ${this.clients.size})`);
 
     return clientId;
   }
@@ -90,6 +143,10 @@ export class SSEService {
   static unregisterClient(clientId: string): void {
     const client = this.clients.get(clientId);
     if (client) {
+      // Marcar como abortado
+      client.aborted = true;
+
+      // Eliminar del Map
       this.clients.delete(clientId);
       console.log(`🔌 Cliente SSE desconectado: ${clientId} (user: ${client.userEmail}, total clientes: ${this.clients.size})`);
     }
@@ -157,10 +214,22 @@ export class SSEService {
     console.log(`📡 Emitiendo evento de tablero: ${event.type} (boardId: ${event.boardId})`);
 
     const clientsToNotify: SSEClient[] = [];
+    const now = Math.floor(Date.now() / 1000);
 
-    // Filtrar clientes que están viendo este tablero
+    // Filtrar clientes que están viendo este tablero y tienen token válido
     for (const client of this.clients.values()) {
       if (client.boardIds.has(event.boardId)) {
+        // Verificar si la conexión fue abortada
+        if (client.aborted) {
+          console.log(`💀 Saltando cliente ${client.id} porque ya fue abortado`);
+          continue;
+        }
+
+        // Verificar si el token ha expirado
+        if (client.tokenExp <= now) {
+          console.log(`⏰ Saltando cliente ${client.id} con token expirado (exp: ${new Date(client.tokenExp * 1000).toISOString()})`);
+          continue;
+        }
         clientsToNotify.push(client);
       }
     }
@@ -198,10 +267,23 @@ export class SSEService {
     console.log(`📧 Emitiendo evento personal: ${event.type} (userId: ${event.userId})`);
 
     let sentCount = 0;
+    const now = Math.floor(Date.now() / 1000);
 
-    // Enviar a todos los clientes de este usuario
+    // Enviar a todos los clientes de este usuario con token válido
     for (const client of this.clients.values()) {
       if (client.userId === event.userId) {
+        // Verificar si la conexión fue abortada
+        if (client.aborted) {
+          console.log(`💀 Saltando cliente ${client.id} porque ya fue abortado`);
+          continue;
+        }
+
+        // Verificar si el token ha expirado
+        if (client.tokenExp <= now) {
+          console.log(`⏰ Saltando cliente ${client.id} con token expirado (exp: ${new Date(client.tokenExp * 1000).toISOString()})`);
+          continue;
+        }
+
         this.sendToClient(client, event).then(success => {
           if (success) {
             sentCount++;
@@ -215,28 +297,56 @@ export class SSEService {
     }
 
     if (sentCount === 0) {
-      console.log(`ℹ️ Usuario ${event.userId} no tiene clientes conectados`);
+      console.log(`ℹ️ Usuario ${event.userId} no tiene clientes conectados con token válido`);
     }
   }
 
   /**
    * Envía un heartbeat a todos los clientes para mantener la conexión viva
+   * También detecta y limpia conexiones con tokens expirados o abortadas
    */
   static sendHeartbeat(): void {
     const deadClients: string[] = [];
+    const now = Math.floor(Date.now() / 1000); // Current time in seconds
 
     for (const [clientId, client] of this.clients.entries()) {
+      // Verificar si la conexión ya fue abortada
+      if (client.aborted) {
+        console.log(`💀 Cliente ${clientId} ya fue abortado pero sigue en el Map`);
+        deadClients.push(clientId);
+        continue;
+      }
+
+      // Verificar si el token ha expirado
+      if (client.tokenExp <= now) {
+        console.log(`⏰ Cliente ${clientId} tiene token expirado (exp: ${new Date(client.tokenExp * 1000).toISOString()})`);
+        deadClients.push(clientId);
+        continue;
+      }
+
+      // Verificar si la conexión lleva demasiado tiempo (más de 2 horas)
+      const connectionAge = Date.now() - client.createdAt;
+      if (connectionAge > 2 * 60 * 60 * 1000) {
+        console.log(`⏰ Cliente ${clientId} tiene conexión muy antigua (${Math.floor(connectionAge / 60000)} minutos)`);
+        deadClients.push(clientId);
+        continue;
+      }
+
+      // Intentar enviar heartbeat
       try {
         client.controller.writeSSE({ data: 'heartbeat', event: 'ping' });
       } catch (error) {
-        console.error(`Error enviando heartbeat a cliente ${clientId}:`, error);
+        console.error(`❌ Error enviando heartbeat a cliente ${clientId}:`, error);
         deadClients.push(clientId);
       }
     }
 
     // Limpiar clientes muertos
-    for (const clientId of deadClients) {
-      this.unregisterClient(clientId);
+    if (deadClients.length > 0) {
+      console.log(`🧹 Limpiando ${deadClients.length} clientes muertos/expirados/abortados`);
+      for (const clientId of deadClients) {
+        this.unregisterClient(clientId);
+      }
     }
   }
 
@@ -244,22 +354,26 @@ export class SSEService {
    * Obtiene estadísticas del servicio SSE
    */
   static getStats() {
+    const now = Math.floor(Date.now() / 1000);
     return {
       totalClients: this.clients.size,
       clients: Array.from(this.clients.values()).map(c => ({
         id: c.id,
         userId: c.userId,
         userEmail: c.userEmail,
-        boardIds: Array.from(c.boardIds)
+        boardIds: Array.from(c.boardIds),
+        tokenExpired: c.tokenExp <= now,
+        tokenExp: new Date(c.tokenExp * 1000).toISOString(),
+        connectionAge: Math.floor((Date.now() - c.createdAt) / 1000) // seconds
       }))
     };
   }
 }
 
-// Configurar heartbeat cada 30 segundos para mantener conexiones vivas
+// Configurar heartbeat cada 10 segundos para detectar y limpiar conexiones muertas rápidamente
 setInterval(() => {
   SSEService.sendHeartbeat();
-}, 30000);
+}, 10000);
 
 // ================================
 // Controlador SSE
@@ -383,41 +497,52 @@ class SSEController {
     let clientId: string | null = null;
 
     return streamSSE(c, async (stream) => {
-      // Registrar cliente
-      clientId = SSEService.registerClient(appUser.userId, appUser.email, stream);
+      // Registrar cliente con token expiration
+      // IMPORTANTE: esto cierra automáticamente cualquier conexión antigua del mismo usuario
+      clientId = SSEService.registerClient(appUser.userId, appUser.email, stream, keycloakUser.exp);
 
       // Suscribir a tableros si se proporcionaron
       if (boardIds.length > 0) {
         SSEService.updateClientBoards(clientId, boardIds);
       }
 
-      // Enviar evento inicial de conexión
+      // Mantener la conexión abierta
+      let isRunning = true;
+
+      // CRÍTICO: Detectar cuando el cliente se desconecta
+      // Este callback se ejecuta cuando:
+      // - El usuario cierra la pestaña
+      // - El usuario navega a otra página
+      // - El usuario recarga la página
+      // - La conexión de red se pierde
+      stream.onAbort(() => {
+        console.log(`🔴 stream.onAbort() ejecutado para cliente: ${clientId}`);
+        isRunning = false;
+        if (clientId) {
+          SSEService.unregisterClient(clientId);
+        }
+      });
+
+      // Enviar evento inicial de conexión DESPUÉS de configurar onAbort
       await stream.writeSSE({
         event: 'connected',
         data: JSON.stringify({
           message: 'Conectado al servidor SSE',
           userId: appUser.userId,
           clientId,
-          boardIds
+          boardIds,
+          tokenExp: new Date(keycloakUser.exp * 1000).toISOString()
         })
       });
 
-      // Mantener la conexión abierta
-      let isRunning = true;
-
-      // Detectar cuando el cliente se desconecta
-      stream.onAbort(() => {
-        isRunning = false;
-        if (clientId) {
-          SSEService.unregisterClient(clientId);
-        }
-        console.log(`Cliente desconectado: ${clientId}`);
-      });
-
       // Mantener la stream viva
+      // Esto mantiene la conexión abierta hasta que isRunning se ponga en false
       while (isRunning) {
         await stream.sleep(30000); // Esperar 30 segundos
       }
+
+      // Cuando salimos del loop, asegurarnos de que se limpia
+      console.log(`🔚 Finalizando stream SSE para cliente: ${clientId}`);
     });
   }
 
