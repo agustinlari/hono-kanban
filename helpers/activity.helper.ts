@@ -13,6 +13,7 @@ import type {
   CreateActionPayload,
   ActivityType
 } from '../types/kanban.types';
+import { SSEService } from './sse.helper';
 
 // ================================
 // Lógica de Servicio (ActivityService)
@@ -114,6 +115,31 @@ export class ActivityService {
       }
 
       await client.query('COMMIT');
+
+      // Emitir evento SSE de nuevo comentario
+      // Obtener board_id desde la tarjeta
+      const boardIdQuery = await client.query(`
+        SELECT l.board_id
+        FROM cards c
+        JOIN lists l ON c.list_id = l.id
+        WHERE c.id = $1
+      `, [cardId]);
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'activity:created',
+          boardId,
+          data: {
+            activity: {
+              ...activity,
+              user_email: userData.email,
+              user_name: userData.name
+            },
+            cardId
+          }
+        });
+      }
 
       return {
         ...activity,
@@ -226,6 +252,30 @@ export class ActivityService {
 
       await client.query('COMMIT');
 
+      // Emitir evento SSE de actualización de comentario
+      const boardIdQuery = await client.query(`
+        SELECT l.board_id
+        FROM cards c
+        JOIN lists l ON c.list_id = l.id
+        JOIN card_activity ca ON ca.card_id = c.id
+        WHERE ca.id = $1
+      `, [activityId]);
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'activity:updated',
+          boardId,
+          data: {
+            activity: {
+              ...updatedActivity,
+              user_email: userData.email,
+              user_name: userData.name
+            }
+          }
+        });
+      }
+
       return {
         ...updatedActivity,
         user_email: userData.email,
@@ -271,13 +321,44 @@ export class ActivityService {
         throw new Error('Solo puedes eliminar tus propios comentarios');
       }
 
+      // Obtener información antes de eliminar
+      const activityInfo = await client.query(
+        'SELECT card_id FROM card_activity WHERE id = $1',
+        [activityId]
+      );
+      const cardId = activityInfo.rows[0]?.card_id;
+
       // Eliminar el comentario
       const deleteResult = await client.query(
         'DELETE FROM card_activity WHERE id = $1',
         [activityId]
       );
 
+      // Obtener board_id
+      let boardId = null;
+      if (cardId) {
+        const boardIdQuery = await client.query(`
+          SELECT l.board_id
+          FROM cards c
+          JOIN lists l ON c.list_id = l.id
+          WHERE c.id = $1
+        `, [cardId]);
+        boardId = boardIdQuery.rows[0]?.board_id;
+      }
+
       await client.query('COMMIT');
+
+      // Emitir evento SSE de eliminación de comentario
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'activity:deleted',
+          boardId,
+          data: {
+            activityId,
+            cardId
+          }
+        });
+      }
 
       return deleteResult.rowCount !== null && deleteResult.rowCount > 0;
 

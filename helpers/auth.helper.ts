@@ -12,6 +12,19 @@ import { authMiddleware } from '../middleware/auth'; // <--- ¡AQUÍ ESTÁ LA MA
 import type { User, RegisterRequest, LoginRequest, Variables } from '../types';
 
 // ================================
+// Función de utilidad para verificar tokens JWT
+// ================================
+export function verifyToken(token: string): Variables['user'] | null {
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as Variables['user'];
+    return payload;
+  } catch (error) {
+    console.error('Error verificando token:', error);
+    return null;
+  }
+}
+
+// ================================
 // Lógica de Servicio (AuthService)
 // ================================
 class AuthService {

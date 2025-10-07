@@ -10,6 +10,7 @@ import type {
   NotificationsResponse,
   NotificationType
 } from '../types/kanban.types';
+import { SSEService } from './sse.helper';
 
 // ================================
 // Lógica de Servicio (NotificationService)
@@ -79,8 +80,84 @@ export class NotificationService {
         RETURNING id
       `;
 
-      await client.query(insertQuery, [userId, activityId]);
+      const notificationResult = await client.query(insertQuery, [userId, activityId]);
+      const notificationId = notificationResult.rows[0]?.id;
       console.log(`✅ Notificación creada para user_id=${userId}, activity_id=${activityId}`);
+
+      // Emitir evento SSE personal de nueva notificación
+      // Necesitamos obtener el contador total de notificaciones no leídas
+      const countQuery = `
+        SELECT COUNT(*) as count
+        FROM notifications
+        WHERE user_id = $1 AND read_at IS NULL
+      `;
+      const countResult = await client.query(countQuery, [userId]);
+      const unreadCount = parseInt(countResult.rows[0].count);
+
+      // Obtener información completa de la notificación para el evento
+      const notificationQuery = `
+        SELECT
+          n.id,
+          n.user_id,
+          n.activity_id,
+          n.read_at,
+          n.created_at,
+          ca.card_id,
+          ca.activity_type,
+          ca.description,
+          ca.created_at as activity_created_at,
+          c.title as card_title,
+          l.title as list_title,
+          l.board_id,
+          b.name as board_name,
+          u.email as actor_email,
+          COALESCE(u.name, u.email) as actor_name
+        FROM notifications n
+        JOIN card_activity ca ON n.activity_id = ca.id
+        JOIN cards c ON ca.card_id = c.id
+        JOIN lists l ON c.list_id = l.id
+        JOIN boards b ON l.board_id = b.id
+        LEFT JOIN usuarios u ON ca.user_id = u.id
+        WHERE n.id = $1
+      `;
+      const notificationInfoResult = await client.query(notificationQuery, [notificationId]);
+
+      if (notificationInfoResult.rowCount && notificationInfoResult.rowCount > 0) {
+        const notif = notificationInfoResult.rows[0];
+        const fullNotification = {
+          id: notif.id,
+          user_id: notif.user_id,
+          activity_id: notif.activity_id,
+          read_at: notif.read_at,
+          created_at: notif.created_at,
+          card_id: notif.card_id,
+          card_title: notif.card_title,
+          board_id: notif.board_id,
+          board_name: notif.board_name,
+          list_title: notif.list_title,
+          notification_type: this.determineNotificationType(notif.description),
+          activity: {
+            id: notif.activity_id,
+            card_id: notif.card_id,
+            user_id: notif.user_id,
+            activity_type: notif.activity_type,
+            description: notif.description,
+            created_at: notif.activity_created_at,
+            user_email: notif.actor_email,
+            user_name: notif.actor_name
+          }
+        };
+
+        // Emitir evento SSE personal
+        SSEService.emitUserEvent({
+          type: 'notification:new',
+          userId,
+          data: {
+            notification: fullNotification,
+            unread_count: unreadCount
+          }
+        });
+      }
 
     } catch (error) {
       console.error('Error en NotificationService.createNotificationWithClient:', error);
@@ -287,7 +364,30 @@ export class NotificationService {
       `;
 
       const result = await client.query(query, [notificationId, userId]);
-      return result.rowCount !== null && result.rowCount > 0;
+      const success = result.rowCount !== null && result.rowCount > 0;
+
+      if (success) {
+        // Obtener nuevo contador de notificaciones no leídas
+        const countQuery = `
+          SELECT COUNT(*) as count
+          FROM notifications
+          WHERE user_id = $1 AND read_at IS NULL
+        `;
+        const countResult = await client.query(countQuery, [userId]);
+        const unreadCount = parseInt(countResult.rows[0].count);
+
+        // Emitir evento SSE de notificación leída
+        SSEService.emitUserEvent({
+          type: 'notification:read',
+          userId,
+          data: {
+            notificationId,
+            unread_count: unreadCount
+          }
+        });
+      }
+
+      return success;
 
     } catch (error) {
       console.error('Error en NotificationService.markAsRead:', error);
@@ -311,7 +411,21 @@ export class NotificationService {
       `;
 
       const result = await client.query(query, [userId]);
-      return result.rowCount || 0;
+      const count = result.rowCount || 0;
+
+      if (count > 0) {
+        // Emitir evento SSE de todas las notificaciones leídas
+        SSEService.emitUserEvent({
+          type: 'notification:read_all',
+          userId,
+          data: {
+            count,
+            unread_count: 0
+          }
+        });
+      }
+
+      return count;
 
     } catch (error) {
       console.error('Error en NotificationService.markAllAsRead:', error);

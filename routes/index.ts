@@ -22,6 +22,7 @@ import { projectsRoutes } from '../helpers/projects.helper';
 import { checklistsRoutes } from '../helpers/checklists.helper';
 import { activityRoutes } from '../helpers/activity.helper';
 import { notificationRoutes } from '../helpers/notifications.helper';
+import { sseRoutes } from '../helpers/sse.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -64,7 +65,10 @@ routes.use('/wallpapers/*', serveStatic({
   rewriteRequestPath: (path) => path.replace(/^\/wallpapers/, '/wallpapers')
 }));
 
-// IMPORTANTE: keycloakAuthRoutes PRIMERO para evitar conflictos de rutas
+// IMPORTANTE: SSE routes PRIMERO porque no usa middleware de auth estándar
+routes.route('/', sseRoutes);
+
+// IMPORTANTE: keycloakAuthRoutes después para evitar conflictos de rutas
 routes.route('/', keycloakAuthRoutes);
 routes.route('/', authRoutes);
 routes.route('/', archivoRoutes);

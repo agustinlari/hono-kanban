@@ -10,6 +10,7 @@ import { PermissionAction } from '../types';
 import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload } from '../types/kanban.types';
 import { validateDates, formatDateForDB, parseDate } from '../utils/dateUtils';
 import { ActivityService } from './activity.helper';
+import { SSEService } from './sse.helper';
 
 // ================================
 // Lógica de Servicio (CardService)
@@ -59,6 +60,13 @@ class CardService {
 
       await client.query('COMMIT');
 
+      // Obtener board_id para emitir evento SSE
+      const boardIdQuery = await client.query(
+        'SELECT board_id FROM lists WHERE id = $1',
+        [list_id]
+      );
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
       // Si hay proyecto_id, obtener la información del proyecto
       if (newCard.proyecto_id) {
         const projectQuery = `
@@ -88,6 +96,18 @@ class CardService {
             es_bim: project.es_bim
           };
         }
+      }
+
+      // Emitir evento SSE de creación de tarjeta
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'card:created',
+          boardId,
+          data: {
+            card: newCard,
+            listId: list_id
+          }
+        });
       }
 
       return newCard as Card;
@@ -328,6 +348,24 @@ class CardService {
         };
       }
 
+      // Emitir evento SSE de actualización de tarjeta
+      // Obtener board_id desde la lista de la tarjeta
+      const boardIdQuery = await client.query(
+        'SELECT board_id FROM lists WHERE id = $1',
+        [fullCard.list_id]
+      );
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'card:updated',
+          boardId,
+          data: {
+            card: fullCard
+          }
+        });
+      }
+
       return fullCard;
 
     } catch (error) {
@@ -361,17 +399,37 @@ class CardService {
       }
       const { list_id, position } = cardMetaResult.rows[0];
 
-      // 2. Borrar la tarjeta.
+      // 2. Obtener board_id antes de borrar la tarjeta
+      const boardIdQuery = await client.query(
+        'SELECT board_id FROM lists WHERE id = $1',
+        [list_id]
+      );
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
+      // 3. Borrar la tarjeta.
       await client.query('DELETE FROM cards WHERE id = $1', [id]);
 
-      // 3. Reordenar las tarjetas restantes en la misma lista.
+      // 4. Reordenar las tarjetas restantes en la misma lista.
       // Todas las tarjetas que estaban después de la borrada, deben retroceder una posición.
       await client.query(
         'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2',
         [list_id, position]
       );
-      
+
       await client.query('COMMIT');
+
+      // Emitir evento SSE de eliminación de tarjeta
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'card:deleted',
+          boardId,
+          data: {
+            cardId: id,
+            listId: list_id
+          }
+        });
+      }
+
       return true;
 
     } catch (error) {
@@ -494,6 +552,28 @@ class CardService {
       }
 
       await client.query('COMMIT');
+
+      // Emitir evento SSE de movimiento de tarjeta
+      // Obtener board_id desde la lista de destino
+      const boardIdQuery = await client.query(
+        'SELECT board_id FROM lists WHERE id = $1',
+        [targetListId]
+      );
+      const boardId = boardIdQuery.rows[0]?.board_id;
+
+      if (boardId) {
+        SSEService.emitBoardEvent({
+          type: 'card:moved',
+          boardId,
+          data: {
+            cardId,
+            sourceListId,
+            targetListId,
+            newIndex,
+            movedBetweenLists: sourceListId !== targetListId
+          }
+        });
+      }
 
     } catch (error) {
       await client.query('ROLLBACK');
