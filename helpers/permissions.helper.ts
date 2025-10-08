@@ -300,12 +300,21 @@ class BoardPermissionService {
    */
   static async getUserBoards(userId: number): Promise<any[]> {
     const query = `
-      SELECT 
+      SELECT
         b.id, b.name, b.description, b.created_at, b.updated_at,
         (b.owner_id = $1) as is_owner,
         bm.can_view, bm.can_create_cards, bm.can_edit_cards, bm.can_move_cards,
         bm.can_delete_cards, bm.can_manage_labels, bm.can_add_members,
-        bm.can_remove_members, bm.can_edit_board, bm.can_delete_board, bm.joined_at
+        bm.can_remove_members, bm.can_edit_board, bm.can_delete_board, bm.joined_at,
+        (SELECT COUNT(*) FROM lists WHERE board_id = b.id) as total_lists,
+        (SELECT COUNT(*) FROM cards c
+         INNER JOIN lists l ON c.list_id = l.id
+         WHERE l.board_id = b.id) as total_cards,
+        (SELECT MAX(ca.created_at)
+         FROM card_activity ca
+         INNER JOIN cards c ON ca.card_id = c.id
+         INNER JOIN lists l ON c.list_id = l.id
+         WHERE l.board_id = b.id) as last_activity
       FROM board_members bm
       INNER JOIN boards b ON bm.board_id = b.id
       WHERE bm.user_id = $1 AND bm.can_view = TRUE
