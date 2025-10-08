@@ -201,6 +201,41 @@ export class ActivityService {
   }
 
   /**
+   * Obtiene las actividades recientes de los tableros del usuario
+   */
+  static async getUserRecentActivities(userId: number, limit: number = 5): Promise<any[]> {
+    const query = `
+      SELECT
+        ca.id,
+        ca.card_id,
+        ca.user_id,
+        ca.activity_type,
+        ca.description,
+        ca.created_at,
+        c.title as card_title,
+        l.title as list_title,
+        l.board_id,
+        b.name as board_name,
+        u.email as user_email,
+        COALESCE(u.name, u.email) as user_name
+      FROM card_activity ca
+      JOIN cards c ON ca.card_id = c.id
+      JOIN lists l ON c.list_id = l.id
+      JOIN boards b ON l.board_id = b.id
+      LEFT JOIN usuarios u ON ca.user_id = u.id
+      WHERE l.board_id IN (
+        SELECT board_id FROM board_members
+        WHERE user_id = $1 AND can_view = TRUE
+      )
+      ORDER BY ca.created_at DESC
+      LIMIT $2
+    `;
+
+    const result = await pool.query(query, [userId, limit]);
+    return result.rows;
+  }
+
+  /**
    * Actualiza un comentario (solo el autor puede editarlo)
    */
   static async updateComment(activityId: number, requestingUserId: number, newDescription: string): Promise<CardActivity> {
@@ -501,6 +536,23 @@ class ActivityController {
       return c.json({ error: 'Error interno del servidor' }, 500);
     }
   }
+
+  /**
+   * GET /user/activities/recent - Obtener actividades recientes de los tableros del usuario
+   */
+  static async getRecentActivities(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    try {
+      const limit = parseInt(c.req.query('limit') || '5');
+      const activities = await ActivityService.getUserRecentActivities(user.userId, limit);
+      return c.json({ activities });
+    } catch (error: any) {
+      console.error('Error obteniendo actividades recientes:', error);
+      return c.json({ error: 'Error interno del servidor' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -513,3 +565,6 @@ activityRoutes.get('/cards/:cardId/activities', keycloakAuthMiddleware, Activity
 activityRoutes.post('/cards/:cardId/activities', keycloakAuthMiddleware, requirePermission(PermissionAction.VIEW_BOARD), ActivityController.createComment);
 activityRoutes.put('/activities/:activityId', keycloakAuthMiddleware, ActivityController.updateActivity);
 activityRoutes.delete('/activities/:activityId', keycloakAuthMiddleware, ActivityController.deleteActivity);
+
+// Rutas para actividades del usuario
+activityRoutes.get('/user/activities/recent', keycloakAuthMiddleware, ActivityController.getRecentActivities);
