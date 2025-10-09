@@ -36,6 +36,8 @@ export interface Card {
     proyecto_id: number | null; // Proyecto asociado a la tarjeta
     start_date: Date | null;
     due_date: Date | null;
+    progress: number | null; // Progreso de la tarjeta (0-100)
+    workload_hours: number | null; // Carga de trabajo en horas
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
@@ -101,6 +103,8 @@ export interface UpdateCardPayload {
   proyecto_id?: number | null;
   start_date?: Date | null;
   due_date?: Date | null;
+  progress?: number | null; // Progreso de la tarjeta (0-100)
+  workload_hours?: number | null; // Carga de trabajo en horas
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
   assignees?: number[]; // IDs de usuarios asignados
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
