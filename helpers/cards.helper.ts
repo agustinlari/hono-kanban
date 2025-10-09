@@ -218,10 +218,13 @@ class CardService {
 
         // Agregar nuevas asignaciones
         if (assignees.length > 0) {
+          // Extraer los user_ids para la verificación
+          const userIds = assignees.map(a => a.user_id);
+
           // Verificar que todos los usuarios existen
           const usersCheck = await client.query(
             'SELECT id, email, name FROM usuarios WHERE id = ANY($1)',
-            [assignees]
+            [userIds]
           );
 
           if (usersCheck.rowCount !== assignees.length) {
@@ -229,15 +232,15 @@ class CardService {
           }
 
           // Insertar nuevas asignaciones y crear actividades/notificaciones para nuevos asignados
-          for (const assigneeUserId of assignees) {
+          for (const assigneeData of assignees) {
             await client.query(
-              'INSERT INTO card_assignments (card_id, user_id, assigned_by) VALUES ($1, $2, $3)',
-              [id, assigneeUserId, userId]
+              'INSERT INTO card_assignments (card_id, user_id, assigned_by, assignment_order, workload_cut_point) VALUES ($1, $2, $3, $4, $5)',
+              [id, assigneeData.user_id, userId, assigneeData.assignment_order, assigneeData.workload_cut_point]
             );
 
             // Si es un usuario nuevo (no estaba asignado antes), crear actividad y notificación
-            if (!currentAssignees.includes(assigneeUserId)) {
-              const userData = usersCheck.rows.find(u => u.id === assigneeUserId);
+            if (!currentAssignees.includes(assigneeData.user_id)) {
+              const userData = usersCheck.rows.find(u => u.id === assigneeData.user_id);
               const assignedUserName = userData?.name || userData?.email || 'Usuario';
               const description = `asignó a ${assignedUserName}`;
 
@@ -250,14 +253,14 @@ class CardService {
               );
 
               const activityId = activityResult.rows[0].id;
-              console.log(`✅ [CardService.updateCard] Actividad creada con id=${activityId} para asignación de usuario ${assigneeUserId} por usuario ${userId}`);
+              console.log(`✅ [CardService.updateCard] Actividad creada con id=${activityId} para asignación de usuario ${assigneeData.user_id} por usuario ${userId}`);
 
               // Crear notificación para el usuario asignado (si no es el mismo que asigna)
-              if (assigneeUserId !== userId) {
+              if (assigneeData.user_id !== userId) {
                 try {
                   const { NotificationService } = await import('./notifications.helper');
-                  await NotificationService.createNotificationWithClient(client, assigneeUserId, activityId, description);
-                  console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${assigneeUserId}`);
+                  await NotificationService.createNotificationWithClient(client, assigneeData.user_id, activityId, description);
+                  console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${assigneeData.user_id}`);
                 } catch (notifError) {
                   console.error(`❌ [CardService.updateCard] Error creando notificación:`, notifError);
                 }
@@ -293,8 +296,10 @@ class CardService {
                      'user_email', u.email,
                      'user_name', COALESCE(u.email, 'Usuario'),
                      'assigned_by', ca.assigned_by,
-                     'assigned_at', ca.assigned_at
-                   )
+                     'assigned_at', ca.assigned_at,
+                     'assignment_order', ca.assignment_order,
+                     'workload_cut_point', ca.workload_cut_point
+                   ) ORDER BY ca.assignment_order ASC
                  ) AS assignees
           FROM card_assignments ca
           JOIN usuarios u ON ca.user_id = u.id

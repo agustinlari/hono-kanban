@@ -106,7 +106,11 @@ export interface UpdateCardPayload {
   progress?: number | null; // Progreso de la tarjeta (0-100)
   workload_hours?: number | null; // Carga de trabajo en horas
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
-  assignees?: number[]; // IDs de usuarios asignados
+  assignees?: Array<{
+    user_id: number;
+    assignment_order: number;
+    workload_cut_point: number;
+  }>; // Usuarios asignados con su orden y punto de corte
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
 }
 
@@ -184,6 +188,8 @@ export interface CardAssignee {
   user_name?: string;
   assigned_by: number;
   assigned_at: Date;
+  assignment_order: number;
+  workload_cut_point: number;
 }
 
 /**

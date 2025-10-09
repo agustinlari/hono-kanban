@@ -55,12 +55,14 @@ class BoardService {
 
     // 3. Obtener todos los usuarios asignados a las tarjetas de este tablero
     const assigneesQuery = `
-      SELECT 
+      SELECT
         ca.id,
         ca.card_id,
         ca.user_id,
         ca.assigned_by,
         ca.assigned_at,
+        ca.assignment_order,
+        ca.workload_cut_point,
         u.email as user_email,
         u.email as user_name
       FROM card_assignments ca
@@ -68,6 +70,7 @@ class BoardService {
       INNER JOIN cards c ON ca.card_id = c.id
       INNER JOIN lists l ON c.list_id = l.id
       WHERE l.board_id = $1
+      ORDER BY ca.assignment_order ASC
     `;
     const assigneesResult = await pool.query(assigneesQuery, [id]);
 
@@ -99,7 +102,9 @@ class BoardService {
         user_email: assigneeRow.user_email,
         user_name: assigneeRow.user_name,
         assigned_by: assigneeRow.assigned_by,
-        assigned_at: assigneeRow.assigned_at
+        assigned_at: assigneeRow.assigned_at,
+        assignment_order: assigneeRow.assignment_order,
+        workload_cut_point: parseFloat(assigneeRow.workload_cut_point)
       });
     }
 
