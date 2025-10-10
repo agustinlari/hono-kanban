@@ -234,8 +234,8 @@ class CardService {
           // Insertar nuevas asignaciones y crear actividades/notificaciones para nuevos asignados
           for (const assigneeData of assignees) {
             await client.query(
-              'INSERT INTO card_assignments (card_id, user_id, assigned_by, assignment_order, workload_cut_point) VALUES ($1, $2, $3, $4, $5)',
-              [id, assigneeData.user_id, userId, assigneeData.assignment_order, assigneeData.workload_cut_point]
+              'INSERT INTO card_assignments (card_id, user_id, assigned_by, workload_hours, assignment_order) VALUES ($1, $2, $3, $4, $5)',
+              [id, assigneeData.user_id, userId, assigneeData.workload_hours, assigneeData.assignment_order || null]
             );
 
             // Si es un usuario nuevo (no estaba asignado antes), crear actividad y notificación
@@ -297,9 +297,9 @@ class CardService {
                      'user_name', COALESCE(u.email, 'Usuario'),
                      'assigned_by', ca.assigned_by,
                      'assigned_at', ca.assigned_at,
-                     'assignment_order', ca.assignment_order,
-                     'workload_cut_point', ca.workload_cut_point
-                   ) ORDER BY ca.assignment_order ASC
+                     'workload_hours', ca.workload_hours,
+                     'assignment_order', ca.assignment_order
+                   ) ORDER BY COALESCE(ca.assignment_order, 999) ASC
                  ) AS assignees
           FROM card_assignments ca
           JOIN usuarios u ON ca.user_id = u.id

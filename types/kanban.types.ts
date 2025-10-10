@@ -37,7 +37,6 @@ export interface Card {
     start_date: Date | null;
     due_date: Date | null;
     progress: number | null; // Progreso de la tarjeta (0-100)
-    workload_hours: number | null; // Carga de trabajo en horas
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
@@ -104,13 +103,12 @@ export interface UpdateCardPayload {
   start_date?: Date | null;
   due_date?: Date | null;
   progress?: number | null; // Progreso de la tarjeta (0-100)
-  workload_hours?: number | null; // Carga de trabajo en horas
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
   assignees?: Array<{
     user_id: number;
-    assignment_order: number;
-    workload_cut_point: number;
-  }>; // Usuarios asignados con su orden y punto de corte
+    workload_hours: number;
+    assignment_order?: number;
+  }>; // Usuarios asignados con sus horas individuales y orden opcional
   // No incluimos list_id ni position, ya que se manejarán con una ruta 'move' separada.
 }
 
@@ -188,8 +186,8 @@ export interface CardAssignee {
   user_name?: string;
   assigned_by: number;
   assigned_at: Date;
-  assignment_order: number;
-  workload_cut_point: number;
+  workload_hours: number; // Horas asignadas a este usuario específico
+  assignment_order?: number; // Orden de visualización, puede ser null
 }
 
 /**

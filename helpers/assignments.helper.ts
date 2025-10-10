@@ -20,18 +20,20 @@ class AssignmentService {
    */
   static async getCardAssignees(cardId: string): Promise<CardAssignee[]> {
     const query = `
-      SELECT 
+      SELECT
         ca.id,
         ca.card_id,
         ca.user_id,
         ca.assigned_by,
         ca.assigned_at,
+        ca.workload_hours,
+        ca.assignment_order,
         u.email as user_email,
         u.email as user_name
       FROM card_assignments ca
       INNER JOIN usuarios u ON ca.user_id = u.id
       WHERE ca.card_id = $1
-      ORDER BY ca.assigned_at ASC
+      ORDER BY COALESCE(ca.assignment_order, 999), ca.assigned_at ASC
     `;
 
     const result = await pool.query(query, [cardId]);
@@ -68,14 +70,21 @@ class AssignmentService {
         throw new Error('El usuario ya está asignado a esta tarjeta');
       }
 
-      // Crear la asignación
+      // Calcular el próximo assignment_order (automático)
+      const orderQuery = await client.query(
+        'SELECT COALESCE(MAX(assignment_order), 0) + 1 as next_order FROM card_assignments WHERE card_id = $1',
+        [cardId]
+      );
+      const nextOrder = orderQuery.rows[0].next_order;
+
+      // Crear la asignación con workload_hours por defecto en 0
       const insertQuery = `
-        INSERT INTO card_assignments (card_id, user_id, assigned_by)
-        VALUES ($1, $2, $3)
-        RETURNING id, assigned_at
+        INSERT INTO card_assignments (card_id, user_id, assigned_by, workload_hours, assignment_order)
+        VALUES ($1, $2, $3, 0, $4)
+        RETURNING id, assigned_at, workload_hours, assignment_order
       `;
 
-      const insertResult = await client.query(insertQuery, [cardId, userId, assignedBy]);
+      const insertResult = await client.query(insertQuery, [cardId, userId, assignedBy, nextOrder]);
       const assignment = insertResult.rows[0];
 
       // Retornar la asignación completa con datos del usuario
@@ -119,7 +128,9 @@ class AssignmentService {
         user_email: userData.email,
         user_name: userData.email,
         assigned_by: assignedBy,
-        assigned_at: assignment.assigned_at
+        assigned_at: assignment.assigned_at,
+        workload_hours: assignment.workload_hours,
+        assignment_order: assignment.assignment_order
       };
 
       // Emitir evento SSE para actualizar la tarjeta en todos los clientes
@@ -303,10 +314,11 @@ class AssignmentService {
 
       // Crear las nuevas asignaciones
       const assignments: CardAssignee[] = [];
+      let orderCounter = 1;
       for (const userId of userIds) {
         const insertResult = await client.query(
-          'INSERT INTO card_assignments (card_id, user_id, assigned_by) VALUES ($1, $2, $3) RETURNING id, assigned_at',
-          [cardId, userId, assignedBy]
+          'INSERT INTO card_assignments (card_id, user_id, assigned_by, workload_hours, assignment_order) VALUES ($1, $2, $3, 0, $4) RETURNING id, assigned_at, workload_hours, assignment_order',
+          [cardId, userId, assignedBy, orderCounter]
         );
 
         const userData = usersCheck.rows.find((u: any) => u.id === userId);
@@ -317,8 +329,11 @@ class AssignmentService {
           user_email: userData.email,
           user_name: userData.email,
           assigned_by: assignedBy,
-          assigned_at: insertResult.rows[0].assigned_at
+          assigned_at: insertResult.rows[0].assigned_at,
+          workload_hours: insertResult.rows[0].workload_hours,
+          assignment_order: insertResult.rows[0].assignment_order
         });
+        orderCounter++;
       }
 
       await client.query('COMMIT');

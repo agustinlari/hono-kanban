@@ -39,7 +39,7 @@ class BoardService {
       SELECT
         l.id as list_id, l.title as list_title, l.position as list_position,
         c.id as card_id, c.title as card_title, c.description, c.position as card_position,
-        c.image_url, c.start_date, c.due_date, c.proyecto_id, c.progress, c.workload_hours,
+        c.image_url, c.start_date, c.due_date, c.proyecto_id, c.progress,
         p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
         p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
         p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
@@ -61,8 +61,8 @@ class BoardService {
         ca.user_id,
         ca.assigned_by,
         ca.assigned_at,
+        ca.workload_hours,
         ca.assignment_order,
-        ca.workload_cut_point,
         u.email as user_email,
         u.email as user_name
       FROM card_assignments ca
@@ -70,7 +70,7 @@ class BoardService {
       INNER JOIN cards c ON ca.card_id = c.id
       INNER JOIN lists l ON c.list_id = l.id
       WHERE l.board_id = $1
-      ORDER BY ca.assignment_order ASC
+      ORDER BY COALESCE(ca.assignment_order, 999) ASC
     `;
     const assigneesResult = await pool.query(assigneesQuery, [id]);
 
@@ -103,8 +103,8 @@ class BoardService {
         user_name: assigneeRow.user_name,
         assigned_by: assigneeRow.assigned_by,
         assigned_at: assigneeRow.assigned_at,
-        assignment_order: assigneeRow.assignment_order,
-        workload_cut_point: parseFloat(assigneeRow.workload_cut_point)
+        workload_hours: parseFloat(assigneeRow.workload_hours),
+        assignment_order: assigneeRow.assignment_order
       });
     }
 
@@ -155,7 +155,6 @@ class BoardService {
           start_date: row.start_date || null,
           due_date: row.due_date || null,
           progress: row.progress ?? null,
-          workload_hours: row.workload_hours ?? null,
           created_at: new Date(),
           updated_at: new Date(),
           labels: cardLabelsMap.get(row.card_id) || [],
