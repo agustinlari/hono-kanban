@@ -76,7 +76,7 @@ class BoardService {
 
     // 4. Obtener todas las etiquetas de las tarjetas de este tablero
     const labelsQuery = `
-      SELECT 
+      SELECT
         cl.card_id,
         l.id as label_id, l.name as label_name, l.color as label_color,
         l.created_at as label_created_at, l.updated_at as label_updated_at
@@ -88,6 +88,22 @@ class BoardService {
       ORDER BY l.name;
     `;
     const labelsResult = await pool.query(labelsQuery, [id]);
+
+    // 5. Obtener contadores de checklists (completados/totales) por tarjeta
+    const checklistsQuery = `
+      SELECT
+        c.id as card_id,
+        COUNT(DISTINCT cc.id) as total_checklists,
+        COUNT(ci.id) as total_items,
+        SUM(CASE WHEN ci.is_completed = true THEN 1 ELSE 0 END) as completed_items
+      FROM cards c
+      INNER JOIN lists l ON c.list_id = l.id
+      LEFT JOIN card_checklists cc ON c.id = cc.card_id
+      LEFT JOIN checklist_items ci ON cc.id = ci.checklist_id
+      WHERE l.board_id = $1
+      GROUP BY c.id
+    `;
+    const checklistsResult = await pool.query(checklistsQuery, [id]);
 
     // 4. Crear un mapa de usuarios asignados por tarjeta
     const cardAssigneesMap = new Map<string, any[]>();
@@ -124,6 +140,15 @@ class BoardService {
       });
     }
 
+    // 6. Crear un mapa de contadores de checklists por tarjeta
+    const cardChecklistsMap = new Map<string, { total_items: number, completed_items: number }>();
+    for (const checklistRow of checklistsResult.rows) {
+      cardChecklistsMap.set(checklistRow.card_id, {
+        total_items: parseInt(checklistRow.total_items) || 0,
+        completed_items: parseInt(checklistRow.completed_items) || 0
+      });
+    }
+
     // 5. Procesar los resultados para anidar los datos correctamente
     const listsMap = new Map<number, List>();
     for (const row of listsAndCardsResult.rows) {
@@ -144,6 +169,7 @@ class BoardService {
       // Si la fila tiene datos de una tarjeta, la añadimos a su lista
       if (row.card_id) {
         const list = listsMap.get(row.list_id)!;
+        const checklistStats = cardChecklistsMap.get(row.card_id) || { total_items: 0, completed_items: 0 };
         const cardData: any = {
           id: row.card_id,
           title: row.card_title,
@@ -158,7 +184,9 @@ class BoardService {
           created_at: new Date(),
           updated_at: new Date(),
           labels: cardLabelsMap.get(row.card_id) || [],
-          assignees: cardAssigneesMap.get(row.card_id) || []
+          assignees: cardAssigneesMap.get(row.card_id) || [],
+          checklist_items_total: checklistStats.total_items,
+          checklist_items_completed: checklistStats.completed_items
         };
 
         // Agregar información del proyecto si existe
