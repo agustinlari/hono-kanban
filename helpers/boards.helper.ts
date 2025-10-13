@@ -39,7 +39,7 @@ class BoardService {
       SELECT
         l.id as list_id, l.title as list_title, l.position as list_position,
         c.id as card_id, c.title as card_title, c.description, c.position as card_position,
-        c.image_url, c.start_date, c.due_date, c.proyecto_id, c.progress,
+        c.image_url, c.start_date, c.due_date, c.proyecto_id, c.progress, c.display_override,
         p.nombre_proyecto, p.descripcion as proyecto_descripcion, p.activo as proyecto_activo,
         p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
         p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
@@ -181,6 +181,7 @@ class BoardService {
           start_date: row.start_date || null,
           due_date: row.due_date || null,
           progress: row.progress ?? null,
+          display_override: row.display_override || null,
           created_at: new Date(),
           updated_at: new Date(),
           labels: cardLabelsMap.get(row.card_id) || [],

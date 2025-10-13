@@ -25,6 +25,11 @@ export interface Label {
     updated_at: Date;
 }
 
+// Tipo para el campo JSONB display_override
+export interface DisplayOverride {
+    show_description?: boolean;
+}
+
 // Refleja la tabla 'cards' de la BBDD
 export interface Card {
     id: string; // UUID
@@ -37,6 +42,7 @@ export interface Card {
     start_date: Date | null;
     due_date: Date | null;
     progress: number | null; // Progreso de la tarjeta (0-100)
+    display_override: DisplayOverride | null; // Configuración de visualización de campos
     created_at: Date;
     updated_at: Date;
     labels?: Label[]; // Etiquetas asociadas a la tarjeta
@@ -103,6 +109,7 @@ export interface UpdateCardPayload {
   start_date?: Date | null;
   due_date?: Date | null;
   progress?: number | null; // Progreso de la tarjeta (0-100)
+  display_override?: DisplayOverride | null; // Configuración de visualización de campos
   labels?: Label[]; // Añadir soporte para actualizar etiquetas
   assignees?: Array<{
     user_id: number;
