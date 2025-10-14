@@ -7,7 +7,7 @@ import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import { requirePermission } from '../middleware/permissions';
 import type { Variables } from '../types';
 import { PermissionAction } from '../types';
-import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload } from '../types/kanban.types';
+import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload, MoveCardToBoardPayload } from '../types/kanban.types';
 import { validateDates, formatDateForDB, parseDate } from '../utils/dateUtils';
 import { ActivityService } from './activity.helper';
 import { SSEService } from './sse.helper';
@@ -590,6 +590,196 @@ class CardService {
   }
 
   /**
+   * Mueve una tarjeta a un tablero diferente
+   * Maneja la validación de permisos, filtrado de asignados y etiquetas
+   */
+  static async moveCardToBoard(data: MoveCardToBoardPayload, userId: number): Promise<void> {
+    const { cardId, targetBoardId, targetListId, newIndex } = data;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Obtener información de la tarjeta actual (board, list, assignees, labels)
+      const cardQuery = `
+        SELECT c.id, c.list_id, l.board_id, l.title as list_title
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        WHERE c.id = $1
+      `;
+      const cardResult = await client.query(cardQuery, [cardId]);
+
+      if (cardResult.rowCount === 0) {
+        throw new Error('La tarjeta a mover no existe.');
+      }
+
+      const card = cardResult.rows[0];
+      const sourceBoardId = card.board_id;
+      const sourceListId = card.list_id;
+
+      // Si el tablero de destino es el mismo, usar el método moveCard normal
+      if (sourceBoardId === targetBoardId) {
+        await client.query('ROLLBACK');
+        throw new Error('Para mover tarjetas dentro del mismo tablero, usa el endpoint /cards/move');
+      }
+
+      // 2. Verificar permisos del usuario en el tablero de destino
+      const { PermissionService } = await import('../middleware/permissions');
+      const hasPermission = await PermissionService.hasPermission(userId, targetBoardId, PermissionAction.MOVE_CARDS);
+
+      if (!hasPermission) {
+        throw new Error('No tienes permisos para mover tarjetas al tablero de destino.');
+      }
+
+      // 3. Obtener nombres de tableros para el registro de actividad
+      const boardsQuery = `SELECT id, name FROM boards WHERE id = ANY($1)`;
+      const boardsResult = await client.query(boardsQuery, [[sourceBoardId, targetBoardId]]);
+      const sourceBoard = boardsResult.rows.find((b: any) => b.id === sourceBoardId);
+      const targetBoard = boardsResult.rows.find((b: any) => b.id === targetBoardId);
+      const sourceBoardName = sourceBoard?.name || 'Tablero origen';
+      const targetBoardName = targetBoard?.name || 'Tablero destino';
+
+      // 4. Verificar que la lista de destino existe y pertenece al tablero de destino
+      const targetListQuery = `SELECT id FROM lists WHERE id = $1 AND board_id = $2`;
+      const targetListResult = await client.query(targetListQuery, [targetListId, targetBoardId]);
+
+      if (targetListResult.rowCount === 0) {
+        throw new Error('La lista de destino no existe o no pertenece al tablero especificado.');
+      }
+
+      // 5. Obtener los miembros del tablero de destino
+      const targetBoardMembersQuery = `SELECT user_id FROM board_members WHERE board_id = $1`;
+      const targetBoardMembersResult = await client.query(targetBoardMembersQuery, [targetBoardId]);
+      const targetBoardMemberIds = new Set(targetBoardMembersResult.rows.map((row: any) => row.user_id));
+
+      // 6. Obtener los IDs de las etiquetas del tablero de destino
+      const targetBoardLabelsQuery = `SELECT id FROM labels WHERE board_id = $1`;
+      const targetBoardLabelsResult = await client.query(targetBoardLabelsQuery, [targetBoardId]);
+      const targetBoardLabelIds = new Set(targetBoardLabelsResult.rows.map((row: any) => row.id));
+
+      // 7. Obtener asignados actuales de la tarjeta
+      const currentAssigneesQuery = `SELECT user_id FROM card_assignments WHERE card_id = $1`;
+      const currentAssigneesResult = await client.query(currentAssigneesQuery, [cardId]);
+      const currentAssignees = currentAssigneesResult.rows.map((row: any) => row.user_id);
+
+      // 8. Filtrar asignados: mantener solo los que son miembros del tablero de destino
+      const assigneesToRemove = currentAssignees.filter(uid => !targetBoardMemberIds.has(uid));
+
+      if (assigneesToRemove.length > 0) {
+        await client.query(
+          `DELETE FROM card_assignments WHERE card_id = $1 AND user_id = ANY($2)`,
+          [cardId, assigneesToRemove]
+        );
+        console.log(`✅ Eliminados ${assigneesToRemove.length} asignados que no son miembros del tablero de destino`);
+      }
+
+      // 9. Obtener etiquetas actuales de la tarjeta
+      const currentLabelsQuery = `SELECT label_id FROM card_labels WHERE card_id = $1`;
+      const currentLabelsResult = await client.query(currentLabelsQuery, [cardId]);
+      const currentLabels = currentLabelsResult.rows.map((row: any) => row.label_id);
+
+      // 10. Filtrar etiquetas: mantener solo las que existen en el tablero de destino
+      const labelsToRemove = currentLabels.filter(lid => !targetBoardLabelIds.has(lid));
+
+      if (labelsToRemove.length > 0) {
+        await client.query(
+          `DELETE FROM card_labels WHERE card_id = $1 AND label_id = ANY($2)`,
+          [cardId, labelsToRemove]
+        );
+        console.log(`✅ Eliminadas ${labelsToRemove.length} etiquetas que no existen en el tablero de destino`);
+      }
+
+      // 11. Cerrar el hueco en la lista de origen
+      const positionResult = await client.query('SELECT position FROM cards WHERE id = $1', [cardId]);
+      const originalPosition = positionResult.rows[0].position;
+
+      await client.query(
+        'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2',
+        [sourceListId, originalPosition]
+      );
+
+      // 12. Hacer espacio en la lista de destino
+      await client.query(
+        'UPDATE cards SET position = position + 1 WHERE list_id = $1 AND position >= $2',
+        [targetListId, newIndex]
+      );
+
+      // 13. Actualizar la tarjeta a la nueva lista y posición
+      await client.query(
+        'UPDATE cards SET list_id = $1, position = $2 WHERE id = $3',
+        [targetListId, newIndex, cardId]
+      );
+
+      // 14. Registrar actividad
+      const description = `movió esta tarjeta de "${sourceBoardName}" a "${targetBoardName}"`;
+      const activityResult = await client.query(
+        `INSERT INTO card_activity (card_id, user_id, activity_type, description)
+         VALUES ($1, $2, 'ACTION', $3)
+         RETURNING id`,
+        [cardId, userId, description]
+      );
+
+      const activityId = activityResult.rows[0].id;
+
+      // 15. Crear notificaciones para los asignados restantes (que no fueron removidos)
+      const remainingAssigneesQuery = `
+        SELECT user_id FROM card_assignments
+        WHERE card_id = $1 AND user_id != $2
+      `;
+      const remainingAssigneesResult = await client.query(remainingAssigneesQuery, [cardId, userId]);
+
+      if (remainingAssigneesResult.rows.length > 0) {
+        const { NotificationService } = await import('./notifications.helper');
+        for (const row of remainingAssigneesResult.rows) {
+          try {
+            await NotificationService.createNotificationWithClient(client, row.user_id, activityId, description);
+          } catch (notifError) {
+            console.error(`Error creando notificación de movimiento entre tableros para user_id=${row.user_id}:`, notifError);
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+
+      // 16. Emitir eventos SSE a ambos tableros
+      SSEService.emitBoardEvent({
+        type: 'card:moved',
+        boardId: sourceBoardId,
+        data: {
+          cardId,
+          sourceListId,
+          targetListId,
+          newIndex,
+          movedToAnotherBoard: true,
+          targetBoardId
+        }
+      });
+
+      SSEService.emitBoardEvent({
+        type: 'card:moved',
+        boardId: targetBoardId,
+        data: {
+          cardId,
+          sourceListId,
+          targetListId,
+          newIndex,
+          movedFromAnotherBoard: true,
+          sourceBoardId
+        }
+      });
+
+      console.log(`✅ Tarjeta ${cardId} movida exitosamente de tablero ${sourceBoardId} a tablero ${targetBoardId}`);
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en CardService.moveCardToBoard:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Obtiene todos los proyectos disponibles para asociar a tarjetas
    */
   static async getAvailableProjects(): Promise<any[]> {
@@ -752,6 +942,67 @@ class CardController {
   }
 
   /**
+   * Maneja el movimiento de una tarjeta a un tablero diferente
+   */
+  static async moveToBoard(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const data: MoveCardToBoardPayload = await c.req.json();
+
+      console.log('=== BACKEND CARD MOVE TO BOARD DEBUG ===');
+      console.log('Datos recibidos:', JSON.stringify(data, null, 2));
+      console.log('=========================================');
+
+      // Validación y conversión de tipos
+      const cardId = String(data.cardId);
+      const targetBoardId = typeof data.targetBoardId === 'string' ? parseInt(data.targetBoardId) : data.targetBoardId;
+      const targetListId = typeof data.targetListId === 'string' ? parseInt(data.targetListId) : data.targetListId;
+      const newIndex = typeof data.newIndex === 'string' ? parseInt(data.newIndex) : data.newIndex;
+
+      // Validación básica
+      if (!cardId || isNaN(targetBoardId) || isNaN(targetListId) || isNaN(newIndex)) {
+        console.log('❌ Error de validación en moveToBoard');
+        return c.json({
+          error: 'Parámetros inválidos',
+          details: {
+            cardId: !!cardId,
+            targetBoardId: !isNaN(targetBoardId),
+            targetListId: !isNaN(targetListId),
+            newIndex: !isNaN(newIndex)
+          }
+        }, 400);
+      }
+
+      const moveData = {
+        cardId,
+        targetBoardId,
+        targetListId,
+        newIndex
+      };
+
+      console.log('✅ Datos procesados para CardService.moveCardToBoard:', moveData);
+
+      await CardService.moveCardToBoard(moveData, user.userId);
+
+      console.log('✅ Tarjeta movida exitosamente a otro tablero');
+
+      return c.body(null, 204);
+
+    } catch (error: any) {
+      console.error('❌ Error en CardController.moveToBoard:', error);
+      if (error.message.includes('no existe')) {
+        return c.json({ error: error.message }, 404);
+      }
+      if (error.message.includes('permisos')) {
+        return c.json({ error: error.message }, 403);
+      }
+      return c.json({ error: 'No se pudo mover la tarjeta a otro tablero', details: error.message }, 500);
+    }
+  }
+
+  /**
    * Obtiene todos los proyectos disponibles para asociar a tarjetas
    */
   static async getProjects(c: Context) {
@@ -777,6 +1028,7 @@ cardRoutes.post('/cards', requirePermission(PermissionAction.CREATE_CARDS), Card
 cardRoutes.put('/cards/:id', requirePermission(PermissionAction.EDIT_CARDS), CardController.update);
 cardRoutes.delete('/cards/:id', requirePermission(PermissionAction.DELETE_CARDS), CardController.delete);
 cardRoutes.patch('/cards/move', requirePermission(PermissionAction.MOVE_CARDS), CardController.move);
+cardRoutes.patch('/cards/move-to-board', requirePermission(PermissionAction.MOVE_CARDS), CardController.moveToBoard);
 
 // Endpoint para obtener proyectos disponibles
 cardRoutes.get('/cards/projects', CardController.getProjects);

@@ -126,6 +126,13 @@ export interface MoveCardPayload {
   newIndex: number;     // La nueva posición (índice) en la lista de destino
 }
 
+export interface MoveCardToBoardPayload {
+  cardId: string;         // El ID de la tarjeta que se mueve
+  targetBoardId: number;  // El tablero de destino
+  targetListId: number;   // La lista de destino en el nuevo tablero
+  newIndex: number;       // La nueva posición en la lista de destino
+}
+
 // Interfaces para el manejo de archivos en tarjetas
 export interface CardAttachmentPayload {
   cardId: string;
