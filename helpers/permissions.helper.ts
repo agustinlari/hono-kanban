@@ -310,6 +310,10 @@ class BoardPermissionService {
         (SELECT COUNT(*) FROM cards c
          INNER JOIN lists l ON c.list_id = l.id
          WHERE l.board_id = b.id) as total_cards,
+        (SELECT COUNT(*) FROM card_assignments ca
+         INNER JOIN cards c ON ca.card_id = c.id
+         INNER JOIN lists l ON c.list_id = l.id
+         WHERE l.board_id = b.id AND ca.user_id = $1) as assigned_cards,
         (SELECT MAX(ca.created_at)
          FROM card_activity ca
          INNER JOIN cards c ON ca.card_id = c.id
