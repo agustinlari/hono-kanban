@@ -324,10 +324,10 @@ class DashboardService {
       const currentYear = new Date().getFullYear();
       const today = new Date();
 
-      // Consulta para tareas creadas por semana
+      // Consulta para tareas creadas por semana (basado en start_date)
       const createdQuery = `
         SELECT
-          DATE_TRUNC('week', c.created_at) as week_start,
+          DATE_TRUNC('week', c.start_date) as week_start,
           COUNT(DISTINCT c.id) as count
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
@@ -336,8 +336,9 @@ class DashboardService {
         LEFT JOIN card_assignments ca ON c.id = ca.card_id
         WHERE bm.user_id = $1
           AND bm.can_view = true
-          AND EXTRACT(YEAR FROM c.created_at) = ${currentYear}
-          AND c.created_at <= CURRENT_TIMESTAMP
+          AND c.start_date IS NOT NULL
+          AND EXTRACT(YEAR FROM c.start_date) = ${currentYear}
+          AND c.start_date <= CURRENT_DATE
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
@@ -345,10 +346,10 @@ class DashboardService {
         ORDER BY week_start
       `;
 
-      // Consulta para tareas completadas por semana (basado en updated_at cuando progress = 100)
+      // Consulta para tareas completadas por semana (basado en due_date cuando progress = 100)
       const completedQuery = `
         SELECT
-          DATE_TRUNC('week', c.updated_at) as week_start,
+          DATE_TRUNC('week', c.due_date) as week_start,
           COUNT(DISTINCT c.id) as count
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
@@ -358,8 +359,9 @@ class DashboardService {
         WHERE bm.user_id = $1
           AND bm.can_view = true
           AND c.progress = 100
-          AND EXTRACT(YEAR FROM c.updated_at) = ${currentYear}
-          AND c.updated_at <= CURRENT_TIMESTAMP
+          AND c.due_date IS NOT NULL
+          AND EXTRACT(YEAR FROM c.due_date) = ${currentYear}
+          AND c.due_date <= CURRENT_DATE
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
