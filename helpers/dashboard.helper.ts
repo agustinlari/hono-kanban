@@ -328,7 +328,7 @@ class DashboardService {
       const createdQuery = `
         SELECT
           DATE_TRUNC('week', c.created_at) as week_start,
-          COUNT(*) as count
+          COUNT(DISTINCT c.id) as count
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
@@ -349,7 +349,7 @@ class DashboardService {
       const completedQuery = `
         SELECT
           DATE_TRUNC('week', c.updated_at) as week_start,
-          COUNT(*) as count
+          COUNT(DISTINCT c.id) as count
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
@@ -434,7 +434,7 @@ class DashboardService {
   }
 
   /**
-   * Obtiene datos para el gráfico de carga de trabajo por usuario (próximos 90 días)
+   * Obtiene datos para el gráfico de carga de trabajo por usuario (próximos 60 días)
    */
   static async getWorkload(userId: number, filters?: {
     projectIds?: number[];
@@ -461,13 +461,7 @@ class DashboardService {
         paramIndex++;
       }
 
-      // Fecha actual y fecha final (90 días)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 90);
-
-      // Obtener todas las tareas con asignaciones en el rango de fechas
+      // Obtener tareas incompletas en los próximos 60 días (visión prospectiva)
       const query = `
         SELECT
           c.id as card_id,
@@ -489,7 +483,7 @@ class DashboardService {
           AND c.due_date IS NOT NULL
           AND c.progress < 100
           AND c.due_date >= CURRENT_DATE
-          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          AND c.start_date <= CURRENT_DATE + INTERVAL '60 days'
           ${projectFilter}
           ${boardFilter}
         ORDER BY u.id, c.start_date
@@ -507,6 +501,15 @@ class DashboardService {
 
       const result = await pool.query(finalQuery, params);
 
+      // Si no hay tareas, devolver datos vacíos
+      if (result.rows.length === 0) {
+        return {
+          labels: [],
+          users: [],
+          capacity: []
+        };
+      }
+
       // Agrupar por usuario
       const userWorkloadMap = new Map<number, { name: string; tasks: any[] }>();
       result.rows.forEach(row => {
@@ -519,16 +522,22 @@ class DashboardService {
         userWorkloadMap.get(row.user_id)!.tasks.push(row);
       });
 
-      // Generar array de días laborables (solo lunes a viernes en los próximos 90 días calendario)
+      // Generar rango de fechas: desde HOY hasta HOY + 60 días
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 60);
+
+      // Generar array de días laborables (lunes a viernes) en los próximos 60 días
       const days: Date[] = [];
-      for (let i = 0; i < 90; i++) {
-        const day = new Date(today);
-        day.setDate(day.getDate() + i);
-        const dayOfWeek = day.getDay();
+      const currentDay = new Date(today);
+      while (currentDay <= endDate) {
+        const dayOfWeek = currentDay.getDay();
         // Solo incluir días laborables (lunes a viernes)
         if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-          days.push(day);
+          days.push(new Date(currentDay));
         }
+        currentDay.setDate(currentDay.getDate() + 1);
       }
 
       // Calcular carga por usuario por día
@@ -614,7 +623,7 @@ class DashboardService {
   }
 
   /**
-   * Obtiene datos para el gráfico de carga de trabajo por proyecto (próximos 90 días)
+   * Obtiene datos para el gráfico de carga de trabajo por proyecto (próximos 60 días)
    */
   static async getProjectWorkload(userId: number, filters?: {
     projectIds?: number[];
@@ -641,13 +650,7 @@ class DashboardService {
         paramIndex++;
       }
 
-      // Fecha actual y fecha final (90 días)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const endDate = new Date(today);
-      endDate.setDate(endDate.getDate() + 90);
-
-      // Obtener todas las tareas con sus proyectos en el rango de fechas
+      // Obtener tareas incompletas en los próximos 60 días (visión prospectiva)
       const query = `
         SELECT
           c.id as card_id,
@@ -669,7 +672,7 @@ class DashboardService {
           AND c.due_date IS NOT NULL
           AND c.progress < 100
           AND c.due_date >= CURRENT_DATE
-          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          AND c.start_date <= CURRENT_DATE + INTERVAL '60 days'
           AND c.proyecto_id IS NOT NULL
           ${projectFilter}
           ${boardFilter}
@@ -689,6 +692,15 @@ class DashboardService {
 
       const result = await pool.query(finalQuery, params);
 
+      // Si no hay tareas, devolver datos vacíos
+      if (result.rows.length === 0) {
+        return {
+          labels: [],
+          projects: [],
+          capacity: []
+        };
+      }
+
       // Agrupar por proyecto
       const projectWorkloadMap = new Map<number, { name: string; tasks: any[] }>();
       result.rows.forEach(row => {
@@ -701,16 +713,22 @@ class DashboardService {
         projectWorkloadMap.get(row.proyecto_id)!.tasks.push(row);
       });
 
-      // Generar array de días laborables (solo lunes a viernes en los próximos 90 días calendario)
+      // Generar rango de fechas: desde HOY hasta HOY + 60 días
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 60);
+
+      // Generar array de días laborables (lunes a viernes) en los próximos 60 días
       const days: Date[] = [];
-      for (let i = 0; i < 90; i++) {
-        const day = new Date(today);
-        day.setDate(day.getDate() + i);
-        const dayOfWeek = day.getDay();
+      const currentDay = new Date(today);
+      while (currentDay <= endDate) {
+        const dayOfWeek = currentDay.getDay();
         // Solo incluir días laborables (lunes a viernes)
         if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-          days.push(day);
+          days.push(new Date(currentDay));
         }
+        currentDay.setDate(currentDay.getDate() + 1);
       }
 
       // Calcular carga por proyecto por día
@@ -772,7 +790,7 @@ class DashboardService {
       });
 
       // Calcular capacidad total del equipo basado en los usuarios que realmente aparecen en el gráfico
-      // Contar usuarios únicos de los proyectos mostrados
+      // Contar usuarios únicos de los proyectos mostrados (próximos 60 días)
       const uniqueUsers = new Set<number>();
       const userCheckQuery = `
         SELECT DISTINCT ca.user_id
@@ -785,7 +803,7 @@ class DashboardService {
           AND bm.can_view = true
           AND c.progress < 100
           AND c.due_date >= CURRENT_DATE
-          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          AND c.start_date <= CURRENT_DATE + INTERVAL '60 days'
           AND c.proyecto_id IS NOT NULL
           ${projectFilter}
           ${boardFilter}
