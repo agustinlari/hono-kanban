@@ -570,8 +570,10 @@ class DashboardService {
         });
       });
 
-      // Calcular capacidad (8h/día laborable) - todos los días en el array son laborables
-      const capacity: number[] = days.map(() => 8);
+      // Calcular capacidad total del equipo (número_de_usuarios × 8h/día)
+      const userCount = userWorkloadMap.size;
+      const teamCapacity = userCount * 8;
+      const capacity: number[] = days.map(() => teamCapacity);
 
       // Generar etiquetas (formato: "20 Oct", "21 Oct", etc.) - solo días laborables
       const labels = days.map(day => {
