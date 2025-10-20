@@ -500,19 +500,23 @@ class DashboardService {
         userWorkloadMap.get(row.user_id)!.tasks.push(row);
       });
 
-      // Generar array de días (próximos 90 días)
+      // Generar array de días laborables (solo lunes a viernes en los próximos 90 días calendario)
       const days: Date[] = [];
       for (let i = 0; i < 90; i++) {
         const day = new Date(today);
         day.setDate(day.getDate() + i);
-        days.push(day);
+        const dayOfWeek = day.getDay();
+        // Solo incluir días laborables (lunes a viernes)
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          days.push(day);
+        }
       }
 
       // Calcular carga por usuario por día
       const usersData: Array<{ name: string; data: number[] }> = [];
 
       userWorkloadMap.forEach((userData, userId) => {
-        const dailyWorkload: number[] = new Array(90).fill(0);
+        const dailyWorkload: number[] = new Array(days.length).fill(0);
 
         userData.tasks.forEach(task => {
           const taskStart = new Date(task.start_date);
@@ -544,10 +548,14 @@ class DashboardService {
 
             // Solo asignar horas a días laborables (lunes a viernes)
             if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-              // Calcular índice en el array de 90 días
-              const dayIndex = Math.floor((assignDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              // Buscar el índice de este día en el array de días laborables
+              const dayIndex = days.findIndex(d =>
+                d.getFullYear() === assignDay.getFullYear() &&
+                d.getMonth() === assignDay.getMonth() &&
+                d.getDate() === assignDay.getDate()
+              );
 
-              if (dayIndex >= 0 && dayIndex < 90) {
+              if (dayIndex >= 0) {
                 dailyWorkload[dayIndex] += hoursPerDay;
               }
             }
@@ -562,13 +570,10 @@ class DashboardService {
         });
       });
 
-      // Calcular capacidad (8h/día laborable)
-      const capacity: number[] = days.map(day => {
-        const dayOfWeek = day.getDay();
-        return (dayOfWeek !== 0 && dayOfWeek !== 6) ? 8 : 0;
-      });
+      // Calcular capacidad (8h/día laborable) - todos los días en el array son laborables
+      const capacity: number[] = days.map(() => 8);
 
-      // Generar etiquetas (formato: "20 Oct", "21 Oct", etc.)
+      // Generar etiquetas (formato: "20 Oct", "21 Oct", etc.) - solo días laborables
       const labels = days.map(day => {
         const dayNum = day.getDate();
         const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
