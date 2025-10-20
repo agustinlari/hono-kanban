@@ -322,6 +322,7 @@ class DashboardService {
       }
 
       const currentYear = new Date().getFullYear();
+      const today = new Date();
 
       // Consulta para tareas creadas por semana
       const createdQuery = `
@@ -336,6 +337,7 @@ class DashboardService {
         WHERE bm.user_id = $1
           AND bm.can_view = true
           AND EXTRACT(YEAR FROM c.created_at) = ${currentYear}
+          AND c.created_at <= CURRENT_TIMESTAMP
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
@@ -357,6 +359,7 @@ class DashboardService {
           AND bm.can_view = true
           AND c.progress = 100
           AND EXTRACT(YEAR FROM c.updated_at) = ${currentYear}
+          AND c.updated_at <= CURRENT_TIMESTAMP
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
@@ -369,33 +372,40 @@ class DashboardService {
         pool.query(completedQuery, params)
       ]);
 
-      // Generar todas las semanas del año
+      // Generar semanas desde inicio de año hasta la semana actual
       const weeks: Date[] = [];
       const startOfYear = new Date(currentYear, 0, 1);
+
       // Ajustar al lunes de la primera semana
       const firstMonday = new Date(startOfYear);
       const dayOfWeek = firstMonday.getDay();
       const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
       firstMonday.setDate(firstMonday.getDate() + daysToMonday);
 
-      for (let i = 0; i < 53; i++) {
-        const weekStart = new Date(firstMonday);
-        weekStart.setDate(firstMonday.getDate() + (i * 7));
-        if (weekStart.getFullYear() <= currentYear) {
-          weeks.push(weekStart);
-        }
+      // Calcular el lunes de la semana actual
+      const currentMonday = new Date(today);
+      const currentDayOfWeek = currentMonday.getDay();
+      const daysToCurrentMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+      currentMonday.setDate(currentMonday.getDate() + daysToCurrentMonday);
+      currentMonday.setHours(0, 0, 0, 0);
+
+      // Generar semanas solo hasta la semana actual
+      let weekStart = new Date(firstMonday);
+      while (weekStart <= currentMonday) {
+        weeks.push(new Date(weekStart));
+        weekStart.setDate(weekStart.getDate() + 7);
       }
 
       // Crear mapas de datos
       const createdMap = new Map<string, number>();
       createdResult.rows.forEach(row => {
-        const weekKey = new Date(row.week_start).toISOString();
+        const weekKey = new Date(row.week_start).toISOString().split('T')[0];
         createdMap.set(weekKey, parseInt(row.count));
       });
 
       const completedMap = new Map<string, number>();
       completedResult.rows.forEach(row => {
-        const weekKey = new Date(row.week_start).toISOString();
+        const weekKey = new Date(row.week_start).toISOString().split('T')[0];
         completedMap.set(weekKey, parseInt(row.count));
       });
 
@@ -405,7 +415,7 @@ class DashboardService {
       const completed: number[] = [];
 
       weeks.forEach((week, index) => {
-        const weekKey = week.toISOString();
+        const weekKey = week.toISOString().split('T')[0];
         // Formato de etiqueta: "S1", "S2", etc.
         labels.push(`S${index + 1}`);
         created.push(createdMap.get(weekKey) || 0);
