@@ -264,13 +264,30 @@ class DashboardService {
       `;
       const boardsResult = await pool.query(boardsQuery, [userId]);
 
-      // Usuarios en los tableros del usuario actual
+      // Usuarios: incluir tanto miembros de tableros como usuarios con asignaciones de trabajo
       const usersQuery = `
         SELECT DISTINCT u.id, u.name
         FROM usuarios u
-        INNER JOIN board_members bm ON u.id = bm.user_id
-        WHERE bm.board_id IN (
-          SELECT board_id FROM board_members WHERE user_id = $1 AND can_view = true
+        WHERE u.id IN (
+          -- Usuarios que son miembros de tableros accesibles
+          SELECT DISTINCT bm.user_id
+          FROM board_members bm
+          WHERE bm.board_id IN (
+            SELECT board_id FROM board_members WHERE user_id = $1 AND can_view = true
+          )
+          UNION
+          -- Usuarios con asignaciones de trabajo en tareas incompletas
+          SELECT DISTINCT ca.user_id
+          FROM card_assignments ca
+          INNER JOIN cards c ON ca.card_id = c.id
+          INNER JOIN lists l ON c.list_id = l.id
+          INNER JOIN boards b ON l.board_id = b.id
+          INNER JOIN board_members bm ON b.id = bm.board_id
+          WHERE bm.user_id = $1
+            AND bm.can_view = true
+            AND c.progress < 100
+            AND c.start_date IS NOT NULL
+            AND c.due_date IS NOT NULL
         )
         ORDER BY u.name ASC
       `;
