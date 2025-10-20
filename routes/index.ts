@@ -24,6 +24,7 @@ import { activityRoutes } from '../helpers/activity.helper';
 import { notificationRoutes } from '../helpers/notifications.helper';
 import { sseRoutes } from '../helpers/sse.helper';
 import { roadmapRoutes } from '../helpers/roadmap.helper';
+import { dashboardRoutes } from '../helpers/dashboard.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -86,3 +87,4 @@ routes.route('/', checklistsRoutes);
 routes.route('/', activityRoutes);
 routes.route('/', notificationRoutes);
 routes.route('/', roadmapRoutes);
+routes.route('/', dashboardRoutes);
