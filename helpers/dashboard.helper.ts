@@ -45,6 +45,15 @@ export interface WorkloadData {
   capacity: number[];
 }
 
+export interface ProjectWorkloadData {
+  labels: string[];
+  projects: Array<{
+    name: string;
+    data: number[];
+  }>;
+  capacity: number[];
+}
+
 // ================================
 // Lógica de Servicio (DashboardService)
 // ================================
@@ -593,6 +602,214 @@ class DashboardService {
       throw error;
     }
   }
+
+  /**
+   * Obtiene datos para el gráfico de carga de trabajo por proyecto (próximos 90 días)
+   */
+  static async getProjectWorkload(userId: number, filters?: {
+    projectIds?: number[];
+    boardIds?: number[];
+    userIds?: number[];
+  }): Promise<ProjectWorkloadData> {
+    try {
+      // Construir condiciones de filtro
+      let projectFilter = '';
+      let boardFilter = '';
+      let userFilter = '';
+      const params: any[] = [userId];
+      let paramIndex = 2;
+
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        projectFilter = ` AND c.proyecto_id = ANY($${paramIndex})`;
+        params.push(filters.projectIds);
+        paramIndex++;
+      }
+
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        boardFilter = ` AND b.id = ANY($${paramIndex})`;
+        params.push(filters.boardIds);
+        paramIndex++;
+      }
+
+      // Fecha actual y fecha final (90 días)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 90);
+
+      // Obtener todas las tareas con sus proyectos en el rango de fechas
+      const query = `
+        SELECT
+          c.id as card_id,
+          c.start_date,
+          c.due_date,
+          c.progress,
+          c.proyecto_id,
+          p.nombre_proyecto as project_name,
+          SUM(ca.workload_hours) as total_workload_hours
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.start_date IS NOT NULL
+          AND c.due_date IS NOT NULL
+          AND c.progress < 100
+          AND c.due_date >= CURRENT_DATE
+          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          AND c.proyecto_id IS NOT NULL
+          ${projectFilter}
+          ${boardFilter}
+        GROUP BY c.id, c.start_date, c.due_date, c.progress, c.proyecto_id, p.nombre_proyecto
+        ORDER BY c.proyecto_id, c.start_date
+      `;
+
+      // Filtrar por usuarios específicos si se proporciona
+      let finalQuery = query;
+      if (filters?.userIds && filters.userIds.length > 0) {
+        finalQuery = query.replace(
+          'ORDER BY c.proyecto_id',
+          `HAVING BOOL_OR(ca.user_id = ANY($${paramIndex}))\n        ORDER BY c.proyecto_id`
+        );
+        params.push(filters.userIds);
+      }
+
+      const result = await pool.query(finalQuery, params);
+
+      // Agrupar por proyecto
+      const projectWorkloadMap = new Map<number, { name: string; tasks: any[] }>();
+      result.rows.forEach(row => {
+        if (!projectWorkloadMap.has(row.proyecto_id)) {
+          projectWorkloadMap.set(row.proyecto_id, {
+            name: row.project_name || `Proyecto ${row.proyecto_id}`,
+            tasks: []
+          });
+        }
+        projectWorkloadMap.get(row.proyecto_id)!.tasks.push(row);
+      });
+
+      // Generar array de días laborables (solo lunes a viernes en los próximos 90 días calendario)
+      const days: Date[] = [];
+      for (let i = 0; i < 90; i++) {
+        const day = new Date(today);
+        day.setDate(day.getDate() + i);
+        const dayOfWeek = day.getDay();
+        // Solo incluir días laborables (lunes a viernes)
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          days.push(day);
+        }
+      }
+
+      // Calcular carga por proyecto por día
+      const projectsData: Array<{ name: string; data: number[] }> = [];
+
+      projectWorkloadMap.forEach((projectData, projectId) => {
+        const dailyWorkload: number[] = new Array(days.length).fill(0);
+
+        projectData.tasks.forEach(task => {
+          const taskStart = new Date(task.start_date);
+          taskStart.setHours(0, 0, 0, 0);
+          const taskEnd = new Date(task.due_date);
+          taskEnd.setHours(0, 0, 0, 0);
+
+          // Calcular días laborables entre start y end
+          let workDays = 0;
+          const currentDay = new Date(taskStart);
+          while (currentDay <= taskEnd) {
+            const dayOfWeek = currentDay.getDay();
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+              workDays++;
+            }
+            currentDay.setDate(currentDay.getDate() + 1);
+          }
+
+          // Si no hay días laborables, evitar división por 0
+          if (workDays === 0) workDays = 1;
+
+          // Distribuir horas por día laborable
+          const hoursPerDay = parseFloat(task.total_workload_hours || 0) / workDays;
+
+          // Asignar horas a cada día en el rango
+          const assignDay = new Date(taskStart);
+          while (assignDay <= taskEnd) {
+            const dayOfWeek = assignDay.getDay();
+
+            // Solo asignar horas a días laborables (lunes a viernes)
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+              // Buscar el índice de este día en el array de días laborables
+              const dayIndex = days.findIndex(d =>
+                d.getFullYear() === assignDay.getFullYear() &&
+                d.getMonth() === assignDay.getMonth() &&
+                d.getDate() === assignDay.getDate()
+              );
+
+              if (dayIndex >= 0) {
+                dailyWorkload[dayIndex] += hoursPerDay;
+              }
+            }
+
+            assignDay.setDate(assignDay.getDate() + 1);
+          }
+        });
+
+        projectsData.push({
+          name: projectData.name,
+          data: dailyWorkload.map(h => Math.round(h * 10) / 10)
+        });
+      });
+
+      // Calcular capacidad total del equipo
+      // Para esto, necesitamos contar cuántos usuarios únicos tienen tareas asignadas
+      const userCountQuery = `
+        SELECT COUNT(DISTINCT ca.user_id) as user_count
+        FROM card_assignments ca
+        INNER JOIN cards c ON ca.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.progress < 100
+          AND c.due_date >= CURRENT_DATE
+          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          ${projectFilter}
+          ${boardFilter}
+      `;
+
+      const userCountParams = [userId];
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        userCountParams.push(filters.projectIds);
+      }
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        userCountParams.push(filters.boardIds);
+      }
+
+      const userCountResult = await pool.query(userCountQuery, userCountParams);
+      const userCount = parseInt(userCountResult.rows[0]?.user_count || '1');
+      const teamCapacity = userCount * 8;
+      const capacity: number[] = days.map(() => teamCapacity);
+
+      // Generar etiquetas (formato: "20 Oct", "21 Oct", etc.) - solo días laborables
+      const labels = days.map(day => {
+        const dayNum = day.getDate();
+        const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        const month = monthNames[day.getMonth()];
+        return `${dayNum} ${month}`;
+      });
+
+      return {
+        labels,
+        projects: projectsData,
+        capacity
+      };
+    } catch (error) {
+      console.error('Error en DashboardService.getProjectWorkload:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -693,6 +910,32 @@ class DashboardController {
       return c.json({ error: 'No se pudieron obtener los datos de carga de trabajo' }, 500);
     }
   }
+
+  static async getProjectWorkload(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const projectIds = c.req.query('projectIds')?.split(',').map(Number);
+      const boardIds = c.req.query('boardIds')?.split(',').map(Number);
+      const userIds = c.req.query('userIds')?.split(',').map(Number);
+
+      const filters = {
+        projectIds: projectIds?.filter(id => !isNaN(id)),
+        boardIds: boardIds?.filter(id => !isNaN(id)),
+        userIds: userIds?.filter(id => !isNaN(id))
+      };
+
+      const data = await DashboardService.getProjectWorkload(user.userId, filters);
+      return c.json(data, 200);
+
+    } catch (error: any) {
+      console.error('Error en DashboardController.getProjectWorkload:', error);
+      return c.json({ error: 'No se pudieron obtener los datos de carga de trabajo por proyecto' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -705,5 +948,6 @@ dashboardRoutes.get('/dashboard/metrics', DashboardController.getMetrics);
 dashboardRoutes.get('/dashboard/filters', DashboardController.getFilters);
 dashboardRoutes.get('/dashboard/charts/tasks-timeline', DashboardController.getTasksTimeline);
 dashboardRoutes.get('/dashboard/charts/workload', DashboardController.getWorkload);
+dashboardRoutes.get('/dashboard/charts/project-workload', DashboardController.getProjectWorkload);
 
 export { DashboardController };
