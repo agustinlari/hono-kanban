@@ -761,10 +761,11 @@ class DashboardService {
         });
       });
 
-      // Calcular capacidad total del equipo
-      // Para esto, necesitamos contar cuántos usuarios únicos tienen tareas asignadas
-      const userCountQuery = `
-        SELECT COUNT(DISTINCT ca.user_id) as user_count
+      // Calcular capacidad total del equipo basado en los usuarios que realmente aparecen en el gráfico
+      // Contar usuarios únicos de los proyectos mostrados
+      const uniqueUsers = new Set<number>();
+      const userCheckQuery = `
+        SELECT DISTINCT ca.user_id
         FROM card_assignments ca
         INNER JOIN cards c ON ca.card_id = c.id
         INNER JOIN lists l ON c.list_id = l.id
@@ -775,20 +776,36 @@ class DashboardService {
           AND c.progress < 100
           AND c.due_date >= CURRENT_DATE
           AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          AND c.proyecto_id IS NOT NULL
           ${projectFilter}
           ${boardFilter}
       `;
 
-      const userCountParams = [userId];
+      const userCheckParams = [userId];
+      let userCheckParamIndex = 2;
       if (filters?.projectIds && filters.projectIds.length > 0) {
-        userCountParams.push(filters.projectIds);
+        userCheckParams.push(filters.projectIds);
+        userCheckParamIndex++;
       }
       if (filters?.boardIds && filters.boardIds.length > 0) {
-        userCountParams.push(filters.boardIds);
+        userCheckParams.push(filters.boardIds);
+        userCheckParamIndex++;
       }
 
-      const userCountResult = await pool.query(userCountQuery, userCountParams);
-      const userCount = parseInt(userCountResult.rows[0]?.user_count || '1');
+      let finalUserCheckQuery = userCheckQuery;
+      if (filters?.userIds && filters.userIds.length > 0) {
+        finalUserCheckQuery = userCheckQuery.replace(
+          `${projectFilter}
+          ${boardFilter}`,
+          `${projectFilter}
+          ${boardFilter}
+          AND ca.user_id = ANY($${userCheckParamIndex})`
+        );
+        userCheckParams.push(filters.userIds);
+      }
+
+      const userCheckResult = await pool.query(finalUserCheckQuery, userCheckParams);
+      const userCount = userCheckResult.rows.length || 1;
       const teamCapacity = userCount * 8;
       const capacity: number[] = days.map(() => teamCapacity);
 
