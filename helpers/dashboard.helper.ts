@@ -132,19 +132,10 @@ class DashboardService {
       const completedProjectsResult = await pool.query(completedProjectsQuery, params);
       const completedProjects = completedProjectsResult.rows.length;
 
-      // Tiempo medio por tarea (días entre start_date y fecha de completado)
+      // Tiempo medio por tarea (días entre start_date y updated_at cuando progress = 100)
       const avgTaskTimeQuery = `
         SELECT AVG(
-          EXTRACT(EPOCH FROM (
-            COALESCE(
-              (SELECT created_at FROM card_activity
-               WHERE card_id = c.id
-               AND activity_type = 'progress_updated'
-               AND description LIKE '%100%'
-               ORDER BY created_at DESC LIMIT 1),
-              NOW()
-            ) - c.start_date
-          )) / 86400
+          EXTRACT(EPOCH FROM (c.updated_at - c.start_date)) / 86400
         ) as avg_days
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
@@ -288,7 +279,7 @@ class DashboardService {
   }
 
   /**
-   * Obtiene datos para el gráfico de tareas creadas vs completadas en el año actual
+   * Obtiene datos para el gráfico de tareas creadas vs completadas por semana en el año actual
    */
   static async getTasksTimeline(userId: number, filters?: {
     projectIds?: number[];
@@ -296,14 +287,121 @@ class DashboardService {
     userIds?: number[];
   }): Promise<TasksTimelineData> {
     try {
-      // Obtener el año actual
+      // Construir condiciones de filtro
+      let projectFilter = '';
+      let boardFilter = '';
+      let userFilter = '';
+      const params: any[] = [userId];
+      let paramIndex = 2;
+
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        projectFilter = ` AND c.proyecto_id = ANY($${paramIndex})`;
+        params.push(filters.projectIds);
+        paramIndex++;
+      }
+
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        boardFilter = ` AND b.id = ANY($${paramIndex})`;
+        params.push(filters.boardIds);
+        paramIndex++;
+      }
+
+      if (filters?.userIds && filters.userIds.length > 0) {
+        userFilter = ` AND ca.user_id = ANY($${paramIndex})`;
+        params.push(filters.userIds);
+        paramIndex++;
+      }
+
       const currentYear = new Date().getFullYear();
 
-      // TODO: Implementar lógica real para obtener datos por mes
-      // Por ahora devolver datos de ejemplo
-      const labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-      const created = [12, 15, 18, 22, 19, 25, 28, 30, 26, 24, 20, 18];
-      const completed = [8, 10, 14, 18, 16, 20, 24, 26, 22, 20, 16, 14];
+      // Consulta para tareas creadas por semana
+      const createdQuery = `
+        SELECT
+          DATE_TRUNC('week', c.created_at) as week_start,
+          COUNT(*) as count
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND EXTRACT(YEAR FROM c.created_at) = ${currentYear}
+          ${projectFilter}
+          ${boardFilter}
+          ${userFilter}
+        GROUP BY week_start
+        ORDER BY week_start
+      `;
+
+      // Consulta para tareas completadas por semana (basado en updated_at cuando progress = 100)
+      const completedQuery = `
+        SELECT
+          DATE_TRUNC('week', c.updated_at) as week_start,
+          COUNT(*) as count
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.progress = 100
+          AND EXTRACT(YEAR FROM c.updated_at) = ${currentYear}
+          ${projectFilter}
+          ${boardFilter}
+          ${userFilter}
+        GROUP BY week_start
+        ORDER BY week_start
+      `;
+
+      const [createdResult, completedResult] = await Promise.all([
+        pool.query(createdQuery, params),
+        pool.query(completedQuery, params)
+      ]);
+
+      // Generar todas las semanas del año
+      const weeks: Date[] = [];
+      const startOfYear = new Date(currentYear, 0, 1);
+      // Ajustar al lunes de la primera semana
+      const firstMonday = new Date(startOfYear);
+      const dayOfWeek = firstMonday.getDay();
+      const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      firstMonday.setDate(firstMonday.getDate() + daysToMonday);
+
+      for (let i = 0; i < 53; i++) {
+        const weekStart = new Date(firstMonday);
+        weekStart.setDate(firstMonday.getDate() + (i * 7));
+        if (weekStart.getFullYear() <= currentYear) {
+          weeks.push(weekStart);
+        }
+      }
+
+      // Crear mapas de datos
+      const createdMap = new Map<string, number>();
+      createdResult.rows.forEach(row => {
+        const weekKey = new Date(row.week_start).toISOString();
+        createdMap.set(weekKey, parseInt(row.count));
+      });
+
+      const completedMap = new Map<string, number>();
+      completedResult.rows.forEach(row => {
+        const weekKey = new Date(row.week_start).toISOString();
+        completedMap.set(weekKey, parseInt(row.count));
+      });
+
+      // Generar arrays de datos para cada semana
+      const labels: string[] = [];
+      const created: number[] = [];
+      const completed: number[] = [];
+
+      weeks.forEach((week, index) => {
+        const weekKey = week.toISOString();
+        // Formato de etiqueta: "S1", "S2", etc.
+        labels.push(`S${index + 1}`);
+        created.push(createdMap.get(weekKey) || 0);
+        completed.push(completedMap.get(weekKey) || 0);
+      });
 
       return {
         labels,
@@ -317,7 +415,7 @@ class DashboardService {
   }
 
   /**
-   * Obtiene datos para el gráfico de carga de trabajo por usuario
+   * Obtiene datos para el gráfico de carga de trabajo por usuario (próximos 90 días)
    */
   static async getWorkload(userId: number, filters?: {
     projectIds?: number[];
@@ -325,19 +423,162 @@ class DashboardService {
     userIds?: number[];
   }): Promise<WorkloadData> {
     try {
-      // TODO: Implementar lógica real para obtener carga de trabajo por usuario
-      // Por ahora devolver datos de ejemplo
-      const labels = ['Semana 1', 'Semana 2', 'Semana 3', 'Semana 4'];
-      const users = [
-        { name: 'Usuario 1', data: [32, 35, 38, 40] },
-        { name: 'Usuario 2', data: [28, 30, 32, 35] },
-        { name: 'Usuario 3', data: [25, 28, 30, 32] }
-      ];
-      const capacity = [40, 40, 40, 40]; // Capacidad semanal (40h)
+      // Construir condiciones de filtro
+      let projectFilter = '';
+      let boardFilter = '';
+      let userFilter = '';
+      const params: any[] = [userId];
+      let paramIndex = 2;
+
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        projectFilter = ` AND c.proyecto_id = ANY($${paramIndex})`;
+        params.push(filters.projectIds);
+        paramIndex++;
+      }
+
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        boardFilter = ` AND b.id = ANY($${paramIndex})`;
+        params.push(filters.boardIds);
+        paramIndex++;
+      }
+
+      // Fecha actual y fecha final (90 días)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endDate = new Date(today);
+      endDate.setDate(endDate.getDate() + 90);
+
+      // Obtener todas las tareas con asignaciones en el rango de fechas
+      const query = `
+        SELECT
+          c.id as card_id,
+          c.start_date,
+          c.due_date,
+          c.progress,
+          u.id as user_id,
+          u.name as user_name,
+          ca.workload_hours
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        INNER JOIN card_assignments ca ON c.id = ca.card_id
+        INNER JOIN usuarios u ON ca.user_id = u.id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.start_date IS NOT NULL
+          AND c.due_date IS NOT NULL
+          AND c.progress < 100
+          AND c.due_date >= CURRENT_DATE
+          AND c.start_date <= CURRENT_DATE + INTERVAL '90 days'
+          ${projectFilter}
+          ${boardFilter}
+        ORDER BY u.id, c.start_date
+      `;
+
+      // Filtrar por usuarios específicos si se proporciona
+      let finalQuery = query;
+      if (filters?.userIds && filters.userIds.length > 0) {
+        finalQuery = query.replace(
+          'ORDER BY u.id',
+          `AND u.id = ANY($${paramIndex})\n        ORDER BY u.id`
+        );
+        params.push(filters.userIds);
+      }
+
+      const result = await pool.query(finalQuery, params);
+
+      // Agrupar por usuario
+      const userWorkloadMap = new Map<number, { name: string; tasks: any[] }>();
+      result.rows.forEach(row => {
+        if (!userWorkloadMap.has(row.user_id)) {
+          userWorkloadMap.set(row.user_id, {
+            name: row.user_name,
+            tasks: []
+          });
+        }
+        userWorkloadMap.get(row.user_id)!.tasks.push(row);
+      });
+
+      // Generar array de días (próximos 90 días)
+      const days: Date[] = [];
+      for (let i = 0; i < 90; i++) {
+        const day = new Date(today);
+        day.setDate(day.getDate() + i);
+        days.push(day);
+      }
+
+      // Calcular carga por usuario por día
+      const usersData: Array<{ name: string; data: number[] }> = [];
+
+      userWorkloadMap.forEach((userData, userId) => {
+        const dailyWorkload: number[] = new Array(90).fill(0);
+
+        userData.tasks.forEach(task => {
+          const taskStart = new Date(task.start_date);
+          taskStart.setHours(0, 0, 0, 0);
+          const taskEnd = new Date(task.due_date);
+          taskEnd.setHours(0, 0, 0, 0);
+
+          // Calcular días laborables entre start y end
+          let workDays = 0;
+          const currentDay = new Date(taskStart);
+          while (currentDay <= taskEnd) {
+            const dayOfWeek = currentDay.getDay();
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) { // No contar sábados ni domingos
+              workDays++;
+            }
+            currentDay.setDate(currentDay.getDate() + 1);
+          }
+
+          // Si no hay días laborables, evitar división por 0
+          if (workDays === 0) workDays = 1;
+
+          // Distribuir horas por día laborable
+          const hoursPerDay = parseFloat(task.workload_hours) / workDays;
+
+          // Asignar horas a cada día en el rango
+          const assignDay = new Date(taskStart);
+          while (assignDay <= taskEnd) {
+            const dayOfWeek = assignDay.getDay();
+
+            // Solo asignar horas a días laborables (lunes a viernes)
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+              // Calcular índice en el array de 90 días
+              const dayIndex = Math.floor((assignDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+              if (dayIndex >= 0 && dayIndex < 90) {
+                dailyWorkload[dayIndex] += hoursPerDay;
+              }
+            }
+
+            assignDay.setDate(assignDay.getDate() + 1);
+          }
+        });
+
+        usersData.push({
+          name: userData.name,
+          data: dailyWorkload.map(h => Math.round(h * 10) / 10) // Redondear a 1 decimal
+        });
+      });
+
+      // Calcular capacidad (8h/día laborable)
+      const capacity: number[] = days.map(day => {
+        const dayOfWeek = day.getDay();
+        return (dayOfWeek !== 0 && dayOfWeek !== 6) ? 8 : 0;
+      });
+
+      // Generar etiquetas (formato: "20 Oct", "21 Oct", etc.)
+      const labels = days.map(day => {
+        const dayNum = day.getDate();
+        const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        const month = monthNames[day.getMonth()];
+        return `${dayNum} ${month}`;
+      });
 
       return {
         labels,
-        users,
+        users: usersData,
         capacity
       };
     } catch (error) {
