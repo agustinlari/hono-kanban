@@ -54,6 +54,14 @@ export interface ProjectWorkloadData {
   capacity: number[];
 }
 
+export interface UserProjectDistributionData {
+  labels: string[]; // Nombres de usuarios
+  projects: Array<{
+    name: string;
+    data: number[]; // Cantidad de tareas por usuario para este proyecto
+  }>;
+}
+
 // ================================
 // Lógica de Servicio (DashboardService)
 // ================================
@@ -874,6 +882,115 @@ class DashboardService {
       throw error;
     }
   }
+
+  /**
+   * Obtiene la distribución de proyectos por usuario (todas las tareas incompletas)
+   */
+  static async getUserProjectDistribution(userId: number, filters?: {
+    projectIds?: number[];
+    boardIds?: number[];
+    userIds?: number[];
+  }): Promise<UserProjectDistributionData> {
+    try {
+      // Construir condiciones de filtro
+      let projectFilter = '';
+      let boardFilter = '';
+      let userFilter = '';
+      const params: any[] = [userId];
+      let paramIndex = 2;
+
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        projectFilter = ` AND c.proyecto_id = ANY($${paramIndex})`;
+        params.push(filters.projectIds);
+        paramIndex++;
+      }
+
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        boardFilter = ` AND b.id = ANY($${paramIndex})`;
+        params.push(filters.boardIds);
+        paramIndex++;
+      }
+
+      if (filters?.userIds && filters.userIds.length > 0) {
+        userFilter = ` AND ca.user_id = ANY($${paramIndex})`;
+        params.push(filters.userIds);
+        paramIndex++;
+      }
+
+      // Obtener distribución de proyectos por usuario
+      const query = `
+        SELECT
+          u.id as user_id,
+          u.name as user_name,
+          p.id as project_id,
+          p.nombre_proyecto as project_name,
+          COUNT(DISTINCT c.id) as task_count
+        FROM card_assignments ca
+        INNER JOIN usuarios u ON ca.user_id = u.id
+        INNER JOIN cards c ON ca.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.progress < 100
+          AND c.proyecto_id IS NOT NULL
+          ${projectFilter}
+          ${boardFilter}
+          ${userFilter}
+        GROUP BY u.id, u.name, p.id, p.nombre_proyecto
+        ORDER BY u.name, p.nombre_proyecto
+      `;
+
+      const result = await pool.query(query, params);
+
+      // Si no hay datos, devolver vacío
+      if (result.rows.length === 0) {
+        return {
+          labels: [],
+          projects: []
+        };
+      }
+
+      // Extraer usuarios únicos
+      const usersMap = new Map<number, string>();
+      result.rows.forEach(row => {
+        usersMap.set(row.user_id, row.user_name);
+      });
+      const users = Array.from(usersMap.entries()).map(([id, name]) => ({ id, name }));
+      const labels = users.map(u => u.name);
+
+      // Extraer proyectos únicos
+      const projectsMap = new Map<number, string>();
+      result.rows.forEach(row => {
+        projectsMap.set(row.project_id, row.project_name || `Proyecto ${row.project_id}`);
+      });
+
+      // Crear datasets por proyecto
+      const projectsData: Array<{ name: string; data: number[] }> = [];
+
+      projectsMap.forEach((projectName, projectId) => {
+        const data: number[] = users.map(user => {
+          const row = result.rows.find(r => r.user_id === user.id && r.project_id === projectId);
+          return row ? parseInt(row.task_count) : 0;
+        });
+
+        projectsData.push({
+          name: projectName,
+          data: data
+        });
+      });
+
+      return {
+        labels,
+        projects: projectsData
+      };
+    } catch (error) {
+      console.error('Error en DashboardService.getUserProjectDistribution:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -1000,6 +1117,32 @@ class DashboardController {
       return c.json({ error: 'No se pudieron obtener los datos de carga de trabajo por proyecto' }, 500);
     }
   }
+
+  static async getUserProjectDistribution(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const projectIds = c.req.query('projectIds')?.split(',').map(Number);
+      const boardIds = c.req.query('boardIds')?.split(',').map(Number);
+      const userIds = c.req.query('userIds')?.split(',').map(Number);
+
+      const filters = {
+        projectIds: projectIds?.filter(id => !isNaN(id)),
+        boardIds: boardIds?.filter(id => !isNaN(id)),
+        userIds: userIds?.filter(id => !isNaN(id))
+      };
+
+      const data = await DashboardService.getUserProjectDistribution(user.userId, filters);
+      return c.json(data, 200);
+
+    } catch (error: any) {
+      console.error('Error en DashboardController.getUserProjectDistribution:', error);
+      return c.json({ error: 'No se pudieron obtener los datos de distribución de proyectos por usuario' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -1013,5 +1156,6 @@ dashboardRoutes.get('/dashboard/filters', DashboardController.getFilters);
 dashboardRoutes.get('/dashboard/charts/tasks-timeline', DashboardController.getTasksTimeline);
 dashboardRoutes.get('/dashboard/charts/workload', DashboardController.getWorkload);
 dashboardRoutes.get('/dashboard/charts/project-workload', DashboardController.getProjectWorkload);
+dashboardRoutes.get('/dashboard/charts/user-project-distribution', DashboardController.getUserProjectDistribution);
 
 export { DashboardController };
