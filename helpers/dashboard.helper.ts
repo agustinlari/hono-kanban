@@ -248,7 +248,7 @@ class DashboardService {
     try {
       // Proyectos accesibles
       const projectsQuery = `
-        SELECT DISTINCT p.id, p.nombre_proyecto as name
+        SELECT DISTINCT p.id, '#' || p.codigo || ' ' || p.cadena || ' ' || p.inmueble as name
         FROM proyectos p
         INNER JOIN cards c ON c.proyecto_id = p.id
         INNER JOIN lists l ON c.list_id = l.id
@@ -256,8 +256,8 @@ class DashboardService {
         INNER JOIN board_members bm ON b.id = bm.board_id
         WHERE bm.user_id = $1
           AND bm.can_view = true
-          AND p.nombre_proyecto IS NOT NULL
-        ORDER BY p.nombre_proyecto ASC
+          AND p.codigo IS NOT NULL
+        ORDER BY name ASC
       `;
       const projectsResult = await pool.query(projectsQuery, [userId]);
 
@@ -685,7 +685,7 @@ class DashboardService {
           c.due_date,
           c.progress,
           c.proyecto_id,
-          p.nombre_proyecto as project_name,
+          '#' || p.codigo || ' ' || p.cadena || ' ' || p.inmueble as project_name,
           SUM(ca.workload_hours) as total_workload_hours
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
@@ -703,7 +703,7 @@ class DashboardService {
           AND c.proyecto_id IS NOT NULL
           ${projectFilter}
           ${boardFilter}
-        GROUP BY c.id, c.start_date, c.due_date, c.progress, c.proyecto_id, p.nombre_proyecto
+        GROUP BY c.id, c.start_date, c.due_date, c.progress, c.proyecto_id, p.codigo, p.cadena, p.inmueble
         ORDER BY c.proyecto_id, c.start_date
       `;
 
@@ -923,7 +923,7 @@ class DashboardService {
           u.id as user_id,
           u.name as user_name,
           p.id as project_id,
-          p.nombre_proyecto as project_name,
+          '#' || p.codigo || ' ' || p.cadena || ' ' || p.inmueble as project_name,
           COUNT(DISTINCT c.id) as task_count
         FROM card_assignments ca
         INNER JOIN usuarios u ON ca.user_id = u.id
@@ -939,8 +939,8 @@ class DashboardService {
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
-        GROUP BY u.id, u.name, p.id, p.nombre_proyecto
-        ORDER BY u.name, p.nombre_proyecto
+        GROUP BY u.id, u.name, p.id, p.codigo, p.cadena, p.inmueble
+        ORDER BY u.name, p.codigo
       `;
 
       const result = await pool.query(query, params);
