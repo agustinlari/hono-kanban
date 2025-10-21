@@ -56,10 +56,7 @@ export interface ProjectWorkloadData {
 
 export interface UserProjectDistributionData {
   labels: string[]; // Nombres de usuarios
-  projects: Array<{
-    name: string;
-    data: number[]; // Cantidad de tareas por usuario para este proyecto
-  }>;
+  data: number[]; // Horas totales de trabajo por usuario
 }
 
 // ================================
@@ -917,30 +914,26 @@ class DashboardService {
         paramIndex++;
       }
 
-      // Obtener distribución de proyectos por usuario
+      // Obtener distribución de horas de trabajo por usuario (suma de workload_hours)
       const query = `
         SELECT
           u.id as user_id,
           u.name as user_name,
-          p.id as project_id,
-          '#' || p.codigo || ' ' || p.cadena || ' ' || p.inmueble as project_name,
-          COUNT(DISTINCT c.id) as task_count
+          COALESCE(SUM(ca.workload_hours), 0) as total_hours
         FROM card_assignments ca
         INNER JOIN usuarios u ON ca.user_id = u.id
         INNER JOIN cards c ON ca.card_id = c.id
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
         INNER JOIN board_members bm ON b.id = bm.board_id
-        LEFT JOIN proyectos p ON c.proyecto_id = p.id
         WHERE bm.user_id = $1
           AND bm.can_view = true
           AND c.progress < 100
-          AND c.proyecto_id IS NOT NULL
           ${projectFilter}
           ${boardFilter}
           ${userFilter}
-        GROUP BY u.id, u.name, p.id, p.codigo, p.cadena, p.inmueble
-        ORDER BY u.name, p.codigo
+        GROUP BY u.id, u.name
+        ORDER BY total_hours DESC
       `;
 
       const result = await pool.query(query, params);
@@ -949,42 +942,17 @@ class DashboardService {
       if (result.rows.length === 0) {
         return {
           labels: [],
-          projects: []
+          data: []
         };
       }
 
-      // Extraer usuarios únicos
-      const usersMap = new Map<number, string>();
-      result.rows.forEach(row => {
-        usersMap.set(row.user_id, row.user_name);
-      });
-      const users = Array.from(usersMap.entries()).map(([id, name]) => ({ id, name }));
-      const labels = users.map(u => u.name);
-
-      // Extraer proyectos únicos
-      const projectsMap = new Map<number, string>();
-      result.rows.forEach(row => {
-        projectsMap.set(row.project_id, row.project_name || `Proyecto ${row.project_id}`);
-      });
-
-      // Crear datasets por proyecto
-      const projectsData: Array<{ name: string; data: number[] }> = [];
-
-      projectsMap.forEach((projectName, projectId) => {
-        const data: number[] = users.map(user => {
-          const row = result.rows.find(r => r.user_id === user.id && r.project_id === projectId);
-          return row ? parseInt(row.task_count) : 0;
-        });
-
-        projectsData.push({
-          name: projectName,
-          data: data
-        });
-      });
+      // Extraer labels (nombres de usuarios) y datos (horas totales)
+      const labels = result.rows.map(row => row.user_name);
+      const data = result.rows.map(row => parseFloat(row.total_hours));
 
       return {
         labels,
-        projects: projectsData
+        data
       };
     } catch (error) {
       console.error('Error en DashboardService.getUserProjectDistribution:', error);
