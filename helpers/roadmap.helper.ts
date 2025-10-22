@@ -25,6 +25,7 @@ export interface RoadmapTask {
   proyecto_inicio_obra_prevista: string;
   proyecto_apert_espacio_prevista: string;
   proyecto_numero_obra_osmos: string;
+  assigned_users: Array<{ id: number; name: string }>;
 }
 
 export interface RoadmapData {
@@ -56,17 +57,26 @@ class RoadmapService {
           p.inmueble as proyecto_inmueble,
           p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
           p.apert_espacio_prevista as proyecto_apert_espacio_prevista,
-          p.numero_obra_osmos as proyecto_numero_obra_osmos
+          p.numero_obra_osmos as proyecto_numero_obra_osmos,
+          COALESCE(
+            jsonb_agg(
+              DISTINCT jsonb_build_object('id', ca.user_id, 'name', u.name)
+            ) FILTER (WHERE ca.user_id IS NOT NULL),
+            '[]'::jsonb
+          ) as assigned_users
         FROM cards c
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
         INNER JOIN board_members bm ON b.id = bm.board_id
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        LEFT JOIN usuarios u ON ca.user_id = u.id
         WHERE bm.user_id = $1
           AND bm.can_view = true
           AND c.start_date IS NOT NULL
           AND c.due_date IS NOT NULL
           AND c.proyecto_id IS NOT NULL
+        GROUP BY c.id, b.id, p.id
         ORDER BY c.start_date ASC
       `;
 
