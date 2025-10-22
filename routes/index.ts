@@ -26,6 +26,7 @@ import { sseRoutes } from '../helpers/sse.helper';
 import { roadmapRoutes } from '../helpers/roadmap.helper';
 import { dashboardRoutes } from '../helpers/dashboard.helper';
 import { cardLinkRoutes } from '../helpers/card-links.helper';
+import { peticionesRoutes } from '../helpers/peticiones.helper';
 
 // Importa la constante de la ruta de uploads desde el helper de archivos
 import { UPLOADS_DIR } from '../helpers/archivosHelper'; 
@@ -90,3 +91,4 @@ routes.route('/', notificationRoutes);
 routes.route('/', roadmapRoutes);
 routes.route('/', dashboardRoutes);
 routes.route('/', cardLinkRoutes);
+routes.route('/', peticionesRoutes);
