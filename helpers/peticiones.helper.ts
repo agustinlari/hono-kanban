@@ -12,6 +12,7 @@ import type { Variables } from '../types';
 interface CreateSolicitudCuadroPayload {
   titulo: string;
   descripcion: string;
+  esquemasValidados: 'si' | 'no';
 }
 
 // ================================
@@ -30,7 +31,7 @@ class PeticionesService {
     try {
       await client.query('BEGIN');
 
-      const { titulo, descripcion } = data;
+      const { titulo, descripcion, esquemasValidados } = data;
 
       // 1. Crear la petición en la tabla peticiones
       const peticionQuery = `
@@ -41,7 +42,8 @@ class PeticionesService {
 
       const formData = {
         titulo,
-        descripcion
+        descripcion,
+        esquemasValidados
       };
 
       const peticionResult = await client.query(peticionQuery, [
