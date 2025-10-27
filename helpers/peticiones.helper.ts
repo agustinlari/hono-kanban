@@ -9,16 +9,54 @@ import type { Variables } from '../types';
 // ================================
 // Interfaces
 // ================================
+interface Link {
+  name: string;
+  path: string;
+}
+
 interface CreateSolicitudCuadroPayload {
   titulo: string;
   descripcion: string;
   esquemasValidados: 'si' | 'no';
+  proyectoId?: number | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  vinculos?: Link[];
 }
 
 // ================================
 // Lógica de Servicio (PeticionesService)
 // ================================
 class PeticionesService {
+  /**
+   * Obtiene una petición por ID
+   */
+  static async getPeticionById(peticionId: number) {
+    const client = await pool.connect();
+
+    try {
+      const query = `
+        SELECT id, form_type, form_data, submitted_by_user_id, submitted_at
+        FROM peticiones
+        WHERE id = $1
+      `;
+
+      const result = await client.query(query, [peticionId]);
+
+      if (result.rows.length === 0) {
+        throw new Error('Petición no encontrada');
+      }
+
+      return result.rows[0];
+
+    } catch (error) {
+      console.error('Error en PeticionesService.getPeticionById:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   /**
    * Crea una petición de cuadro eléctrico y su card asociada
    */
@@ -31,7 +69,7 @@ class PeticionesService {
     try {
       await client.query('BEGIN');
 
-      const { titulo, descripcion, esquemasValidados } = data;
+      const { titulo, descripcion, esquemasValidados, proyectoId, startDate, dueDate, vinculos } = data;
 
       // 1. Crear la petición en la tabla peticiones
       const peticionQuery = `
@@ -43,7 +81,11 @@ class PeticionesService {
       const formData = {
         titulo,
         descripcion,
-        esquemasValidados
+        esquemasValidados,
+        proyectoId: proyectoId || null,
+        startDate: startDate || null,
+        dueDate: dueDate || null,
+        vinculos: vinculos || []
       };
 
       const peticionResult = await client.query(peticionQuery, [
@@ -63,6 +105,9 @@ class PeticionesService {
           position,
           progress,
           peticion_id,
+          proyecto_id,
+          start_date,
+          due_date,
           created_at,
           updated_at
         )
@@ -70,7 +115,7 @@ class PeticionesService {
           SELECT COALESCE(MAX(position), 0) + 1
           FROM cards
           WHERE list_id = $3
-        ), $4, $5, NOW(), NOW())
+        ), $4, $5, $6, $7, $8, NOW(), NOW())
         RETURNING id
       `;
 
@@ -79,7 +124,10 @@ class PeticionesService {
         descripcion,
         60, // list_id
         0,  // progress
-        peticionId
+        peticionId,
+        proyectoId || null,
+        startDate || null,
+        dueDate || null
       ]);
 
       const cardId = cardResult.rows[0].id;
@@ -134,6 +182,36 @@ class PeticionesService {
 // Lógica de Controlador (PeticionesController)
 // ================================
 class PeticionesController {
+  static async getPeticion(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const peticionId = parseInt(c.req.param('id'));
+      if (isNaN(peticionId)) {
+        return c.json({ error: 'ID de petición inválido' }, 400);
+      }
+
+      const peticion = await PeticionesService.getPeticionById(peticionId);
+
+      return c.json(peticion, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.getPeticion:', error);
+
+      if (error.message === 'Petición no encontrada') {
+        return c.json({ error: 'Petición no encontrada' }, 404);
+      }
+
+      return c.json({
+        error: 'No se pudo obtener la petición',
+        details: error.message
+      }, 500);
+    }
+  }
+
   static async createSolicitudCuadro(c: Context) {
     try {
       const user = c.get('user');
@@ -172,6 +250,9 @@ class PeticionesController {
 export const peticionesRoutes = new Hono<{ Variables: Variables }>();
 
 peticionesRoutes.use('*', keycloakAuthMiddleware);
+
+// Ruta para obtener una petición por ID
+peticionesRoutes.get('/peticiones/:id', PeticionesController.getPeticion);
 
 // Ruta para crear solicitud de cuadro eléctrico
 peticionesRoutes.post('/peticiones/cuadro-electrico', PeticionesController.createSolicitudCuadro);
