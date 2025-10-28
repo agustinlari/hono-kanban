@@ -22,6 +22,19 @@ interface CreateSolicitudCuadroPayload {
   startDate?: string | null;
   dueDate?: string | null;
   vinculos?: Link[];
+  datosEstructurados?: {
+    nombreCuadro?: string;
+    poderCorte?: number;
+    regimenNeutro?: string;
+    observaciones?: string;
+    valoracionesFacturacion?: string;
+    dimensionFondo?: number;
+    dimensionAncho?: number;
+    dimensionAlto?: number;
+    fechaEntrega?: string | null;
+    paletizado?: string;
+    envioSeparado?: string;
+  };
 }
 
 // ================================
@@ -76,10 +89,14 @@ class PeticionesService {
           c.title as card_title,
           c.progress as card_progress,
           l.board_id,
-          l.title as list_name
+          l.title as list_name,
+          proj.codigo as proyecto_codigo,
+          proj.cadena as proyecto_cliente,
+          proj.inmueble as proyecto_inmueble
         FROM peticiones p
         LEFT JOIN cards c ON c.peticion_id = p.id
         LEFT JOIN lists l ON c.list_id = l.id
+        LEFT JOIN proyectos proj ON (p.form_data->>'proyectoId')::int = proj.id
         WHERE p.submitted_by_user_id = $1
         ${!includeArchived ? 'AND (p.archived IS NULL OR p.archived = false)' : ''}
         ORDER BY p.submitted_at DESC
@@ -147,7 +164,7 @@ class PeticionesService {
     try {
       await client.query('BEGIN');
 
-      const { titulo, descripcion, esquemasValidados, proyectoId, startDate, dueDate, vinculos } = data;
+      const { titulo, descripcion, esquemasValidados, proyectoId, startDate, dueDate, vinculos, datosEstructurados } = data;
 
       // 1. Crear la petición en la tabla peticiones
       const peticionQuery = `
@@ -163,7 +180,9 @@ class PeticionesService {
         proyectoId: proyectoId || null,
         startDate: startDate || null,
         dueDate: dueDate || null,
-        vinculos: vinculos || []
+        vinculos: vinculos || [],
+        // Guardar datos estructurados adicionales
+        ...(datosEstructurados || {})
       };
 
       const peticionResult = await client.query(peticionQuery, [
