@@ -60,7 +60,7 @@ class PeticionesService {
   /**
    * Obtiene todas las peticiones de un usuario
    */
-  static async getPeticionesByUser(userId: number) {
+  static async getPeticionesByUser(userId: number, includeArchived: boolean = false) {
     const client = await pool.connect();
 
     try {
@@ -71,6 +71,7 @@ class PeticionesService {
           p.form_data,
           p.submitted_by_user_id,
           p.submitted_at,
+          p.archived,
           c.id as card_id,
           c.title as card_title,
           c.progress as card_progress,
@@ -80,6 +81,7 @@ class PeticionesService {
         LEFT JOIN cards c ON c.peticion_id = p.id
         LEFT JOIN lists l ON c.list_id = l.id
         WHERE p.submitted_by_user_id = $1
+        ${!includeArchived ? 'AND (p.archived IS NULL OR p.archived = false)' : ''}
         ORDER BY p.submitted_at DESC
       `;
 
@@ -89,6 +91,44 @@ class PeticionesService {
 
     } catch (error) {
       console.error('Error en PeticionesService.getPeticionesByUser:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Archiva o desarchiva una petición
+   */
+  static async toggleArchivePeticion(peticionId: number, userId: number, archived: boolean) {
+    const client = await pool.connect();
+
+    try {
+      // Verificar que la petición pertenece al usuario
+      const checkQuery = `
+        SELECT id FROM peticiones
+        WHERE id = $1 AND submitted_by_user_id = $2
+      `;
+      const checkResult = await client.query(checkQuery, [peticionId, userId]);
+
+      if (checkResult.rows.length === 0) {
+        throw new Error('Petición no encontrada o sin permisos');
+      }
+
+      // Actualizar el estado archived
+      const updateQuery = `
+        UPDATE peticiones
+        SET archived = $1
+        WHERE id = $2
+        RETURNING id, archived
+      `;
+
+      const result = await client.query(updateQuery, [archived, peticionId]);
+
+      return result.rows[0];
+
+    } catch (error) {
+      console.error('Error en PeticionesService.toggleArchivePeticion:', error);
       throw error;
     } finally {
       client.release();
@@ -288,7 +328,10 @@ class PeticionesController {
         return c.json({ error: 'No autorizado' }, 401);
       }
 
-      const peticiones = await PeticionesService.getPeticionesByUser(user.userId);
+      // Obtener parámetro de query para incluir archivadas
+      const includeArchived = c.req.query('includeArchived') === 'true';
+
+      const peticiones = await PeticionesService.getPeticionesByUser(user.userId, includeArchived);
 
       return c.json({
         success: true,
@@ -299,6 +342,45 @@ class PeticionesController {
       console.error('Error en PeticionesController.getUserPeticiones:', error);
       return c.json({
         error: 'No se pudieron obtener las solicitudes',
+        details: error.message
+      }, 500);
+    }
+  }
+
+  static async toggleArchivePeticion(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const peticionId = parseInt(c.req.param('id'));
+      if (isNaN(peticionId)) {
+        return c.json({ error: 'ID de petición inválido' }, 400);
+      }
+
+      const { archived } = await c.req.json();
+
+      if (typeof archived !== 'boolean') {
+        return c.json({ error: 'El campo archived debe ser un booleano' }, 400);
+      }
+
+      const result = await PeticionesService.toggleArchivePeticion(peticionId, user.userId, archived);
+
+      return c.json({
+        success: true,
+        peticion: result
+      }, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.toggleArchivePeticion:', error);
+
+      if (error.message === 'Petición no encontrada o sin permisos') {
+        return c.json({ error: error.message }, 404);
+      }
+
+      return c.json({
+        error: 'No se pudo archivar la petición',
         details: error.message
       }, 500);
     }
@@ -317,6 +399,9 @@ peticionesRoutes.get('/peticiones/user', PeticionesController.getUserPeticiones)
 
 // Ruta para obtener una petición por ID
 peticionesRoutes.get('/peticiones/:id', PeticionesController.getPeticion);
+
+// Ruta para archivar/desarchivar una petición
+peticionesRoutes.patch('/peticiones/:id/archive', PeticionesController.toggleArchivePeticion);
 
 // Ruta para crear solicitud de cuadro eléctrico
 peticionesRoutes.post('/peticiones/cuadro-electrico', PeticionesController.createSolicitudCuadro);
