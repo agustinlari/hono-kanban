@@ -92,11 +92,14 @@ class PeticionesService {
           l.title as list_name,
           proj.codigo as proyecto_codigo,
           proj.cadena as proyecto_cliente,
-          proj.inmueble as proyecto_inmueble
+          proj.inmueble as proyecto_inmueble,
+          u.name as submitted_by_name,
+          u.email as submitted_by_email
         FROM peticiones p
         LEFT JOIN cards c ON c.peticion_id = p.id
         LEFT JOIN lists l ON c.list_id = l.id
         LEFT JOIN proyectos proj ON (p.form_data->>'proyectoId')::int = proj.id
+        LEFT JOIN usuarios u ON p.submitted_by_user_id = u.id
         WHERE p.submitted_by_user_id = $1
         ${!includeArchived ? 'AND (p.archived IS NULL OR p.archived = false)' : ''}
         ORDER BY p.submitted_at DESC
