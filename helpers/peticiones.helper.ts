@@ -118,6 +118,77 @@ class PeticionesService {
   }
 
   /**
+   * Obtiene todas las peticiones (de todos los usuarios)
+   */
+  static async getAllPeticiones(includeArchived: boolean = false) {
+    const client = await pool.connect();
+
+    try {
+      const query = `
+        SELECT
+          p.id,
+          p.form_type,
+          p.form_data,
+          p.submitted_by_user_id,
+          p.submitted_at,
+          p.archived,
+          c.id as card_id,
+          c.title as card_title,
+          c.progress as card_progress,
+          l.board_id,
+          l.title as list_name,
+          proj.codigo as proyecto_codigo,
+          proj.cadena as proyecto_cliente,
+          proj.inmueble as proyecto_inmueble,
+          u.name as submitted_by_name,
+          u.email as submitted_by_email
+        FROM peticiones p
+        LEFT JOIN cards c ON c.peticion_id = p.id
+        LEFT JOIN lists l ON c.list_id = l.id
+        LEFT JOIN proyectos proj ON (p.form_data->>'proyectoId')::int = proj.id
+        LEFT JOIN usuarios u ON p.submitted_by_user_id = u.id
+        ${!includeArchived ? 'WHERE (p.archived IS NULL OR p.archived = false)' : ''}
+        ORDER BY p.submitted_at DESC
+      `;
+
+      const result = await client.query(query);
+
+      return result.rows;
+
+    } catch (error) {
+      console.error('Error en PeticionesService.getAllPeticiones:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Obtiene los tipos de peticiones únicos
+   */
+  static async getPeticionTypes() {
+    const client = await pool.connect();
+
+    try {
+      const query = `
+        SELECT DISTINCT form_type
+        FROM peticiones
+        ORDER BY form_type
+      `;
+
+      const result = await client.query(query);
+
+      return result.rows.map(row => row.form_type);
+
+    } catch (error) {
+      console.error('Error en PeticionesService.getPeticionTypes:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Archiva o desarchiva una petición
    */
   static async toggleArchivePeticion(peticionId: number, userId: number, archived: boolean) {
@@ -369,6 +440,55 @@ class PeticionesController {
     }
   }
 
+  static async getAllPeticiones(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      // Obtener parámetro de query para incluir archivadas
+      const includeArchived = c.req.query('includeArchived') === 'true';
+
+      const peticiones = await PeticionesService.getAllPeticiones(includeArchived);
+
+      return c.json({
+        success: true,
+        peticiones
+      }, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.getAllPeticiones:', error);
+      return c.json({
+        error: 'No se pudieron obtener las solicitudes',
+        details: error.message
+      }, 500);
+    }
+  }
+
+  static async getPeticionTypes(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const types = await PeticionesService.getPeticionTypes();
+
+      return c.json({
+        success: true,
+        types
+      }, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.getPeticionTypes:', error);
+      return c.json({
+        error: 'No se pudieron obtener los tipos de peticiones',
+        details: error.message
+      }, 500);
+    }
+  }
+
   static async toggleArchivePeticion(c: Context) {
     try {
       const user = c.get('user');
@@ -418,6 +538,12 @@ peticionesRoutes.use('*', keycloakAuthMiddleware);
 
 // Ruta para obtener todas las peticiones del usuario
 peticionesRoutes.get('/peticiones/user', PeticionesController.getUserPeticiones);
+
+// Ruta para obtener TODAS las peticiones (de todos los usuarios)
+peticionesRoutes.get('/peticiones/all', PeticionesController.getAllPeticiones);
+
+// Ruta para obtener tipos de peticiones únicos
+peticionesRoutes.get('/peticiones/types', PeticionesController.getPeticionTypes);
 
 // Ruta para obtener una petición por ID
 peticionesRoutes.get('/peticiones/:id', PeticionesController.getPeticion);
