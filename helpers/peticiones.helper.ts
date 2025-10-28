@@ -42,16 +42,36 @@ interface CreateSolicitudCuadroPayload {
 // ================================
 class PeticionesService {
   /**
-   * Obtiene una petición por ID
+   * Obtiene una petición por ID con información completa
    */
   static async getPeticionById(peticionId: number) {
     const client = await pool.connect();
 
     try {
       const query = `
-        SELECT id, form_type, form_data, submitted_by_user_id, submitted_at
-        FROM peticiones
-        WHERE id = $1
+        SELECT
+          p.id,
+          p.form_type,
+          p.form_data,
+          p.submitted_by_user_id,
+          p.submitted_at,
+          p.archived,
+          c.id as card_id,
+          c.title as card_title,
+          c.progress as card_progress,
+          l.board_id,
+          l.title as list_name,
+          proj.codigo as proyecto_codigo,
+          proj.cadena as proyecto_cliente,
+          proj.inmueble as proyecto_inmueble,
+          u.name as submitted_by_name,
+          u.email as submitted_by_email
+        FROM peticiones p
+        LEFT JOIN cards c ON c.peticion_id = p.id
+        LEFT JOIN lists l ON c.list_id = l.id
+        LEFT JOIN proyectos proj ON (p.form_data->>'proyectoId')::int = proj.id
+        LEFT JOIN usuarios u ON p.submitted_by_user_id = u.id
+        WHERE p.id = $1
       `;
 
       const result = await client.query(query, [peticionId]);
