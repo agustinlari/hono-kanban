@@ -72,9 +72,11 @@ class PeticionesService {
           p.submitted_by_user_id,
           p.submitted_at,
           c.id as card_id,
-          c.title as card_title
+          c.title as card_title,
+          l.board_id
         FROM peticiones p
         LEFT JOIN cards c ON c.peticion_id = p.id
+        LEFT JOIN lists l ON c.list_id = l.id
         WHERE p.submitted_by_user_id = $1
         ORDER BY p.submitted_at DESC
       `;
