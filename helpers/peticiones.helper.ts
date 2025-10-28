@@ -58,6 +58,40 @@ class PeticionesService {
   }
 
   /**
+   * Obtiene todas las peticiones de un usuario
+   */
+  static async getPeticionesByUser(userId: number) {
+    const client = await pool.connect();
+
+    try {
+      const query = `
+        SELECT
+          p.id,
+          p.form_type,
+          p.form_data,
+          p.submitted_by_user_id,
+          p.submitted_at,
+          c.id as card_id,
+          c.title as card_title
+        FROM peticiones p
+        LEFT JOIN cards c ON c.peticion_id = p.id
+        WHERE p.submitted_by_user_id = $1
+        ORDER BY p.submitted_at DESC
+      `;
+
+      const result = await client.query(query, [userId]);
+
+      return result.rows;
+
+    } catch (error) {
+      console.error('Error en PeticionesService.getPeticionesByUser:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Crea una petición de cuadro eléctrico y su card asociada
    */
   static async createSolicitudCuadro(
@@ -242,6 +276,29 @@ class PeticionesController {
       }, 500);
     }
   }
+
+  static async getUserPeticiones(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const peticiones = await PeticionesService.getPeticionesByUser(user.userId);
+
+      return c.json({
+        success: true,
+        peticiones
+      }, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.getUserPeticiones:', error);
+      return c.json({
+        error: 'No se pudieron obtener las solicitudes',
+        details: error.message
+      }, 500);
+    }
+  }
 }
 
 // ================================
@@ -250,6 +307,9 @@ class PeticionesController {
 export const peticionesRoutes = new Hono<{ Variables: Variables }>();
 
 peticionesRoutes.use('*', keycloakAuthMiddleware);
+
+// Ruta para obtener todas las peticiones del usuario
+peticionesRoutes.get('/peticiones/user', PeticionesController.getUserPeticiones);
 
 // Ruta para obtener una petición por ID
 peticionesRoutes.get('/peticiones/:id', PeticionesController.getPeticion);
