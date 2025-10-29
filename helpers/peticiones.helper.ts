@@ -37,6 +37,22 @@ interface CreateSolicitudCuadroPayload {
   };
 }
 
+interface CreateSolicitudEnvioPayload {
+  titulo: string;
+  descripcion: string;
+  proyectoId?: number | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  datosEstructurados?: {
+    aEnviar?: string;
+    direccionDestino?: string;
+    aLaAtencionDe?: string;
+    servicio?: string;
+    telefono?: string;
+    observaciones?: string;
+  };
+}
+
 // ================================
 // Lógica de Servicio (PeticionesService)
 // ================================
@@ -367,6 +383,126 @@ class PeticionesService {
       client.release();
     }
   }
+
+  /**
+   * Crea una petición de envío y su card asociada
+   */
+  static async createSolicitudEnvio(
+    userId: number,
+    data: CreateSolicitudEnvioPayload
+  ) {
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const { titulo, descripcion, proyectoId, startDate, dueDate, datosEstructurados } = data;
+
+      // 1. Crear la petición en la tabla peticiones
+      const peticionQuery = `
+        INSERT INTO peticiones (form_type, form_data, submitted_by_user_id)
+        VALUES ($1, $2, $3)
+        RETURNING id
+      `;
+
+      const formData = {
+        titulo,
+        descripcion,
+        proyectoId: proyectoId || null,
+        startDate: startDate || null,
+        dueDate: dueDate || null,
+        // Guardar datos estructurados adicionales
+        ...(datosEstructurados || {})
+      };
+
+      const peticionResult = await client.query(peticionQuery, [
+        'solicitud_envio',
+        JSON.stringify(formData),
+        userId
+      ]);
+
+      const peticionId = peticionResult.rows[0].id;
+
+      // 2. Crear la card en el board 48, lista 72
+      const cardQuery = `
+        INSERT INTO cards (
+          title,
+          description,
+          list_id,
+          position,
+          progress,
+          peticion_id,
+          proyecto_id,
+          start_date,
+          due_date,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, (
+          SELECT COALESCE(MAX(position), 0) + 1
+          FROM cards
+          WHERE list_id = $3
+        ), $4, $5, $6, $7, $8, NOW(), NOW())
+        RETURNING id
+      `;
+
+      const cardResult = await client.query(cardQuery, [
+        titulo,
+        descripcion,
+        72, // list_id para Peticiones envío
+        0,  // progress
+        peticionId,
+        proyectoId || null,
+        startDate || null,
+        dueDate || null
+      ]);
+
+      const cardId = cardResult.rows[0].id;
+
+      // 3. Asignar el usuario a la card
+      const assignmentQuery = `
+        INSERT INTO card_assignments (card_id, user_id, assigned_by, workload_hours, assignment_order)
+        VALUES ($1, $2, $3, $4, $5)
+      `;
+
+      await client.query(assignmentQuery, [
+        cardId,
+        userId,
+        userId, // assigned_by (el usuario se auto-asigna)
+        0,      // workload_hours
+        0       // assignment_order
+      ]);
+
+      // 4. Registrar actividad
+      const activityQuery = `
+        INSERT INTO card_activity (card_id, user_id, activity_type, description)
+        VALUES ($1, $2, $3, $4)
+      `;
+
+      await client.query(activityQuery, [
+        cardId,
+        userId,
+        'ACTION',
+        'creó esta tarjeta desde una solicitud de envío'
+      ]);
+
+      await client.query('COMMIT');
+
+      return {
+        success: true,
+        peticionId,
+        cardId,
+        message: 'Solicitud de envío creada correctamente'
+      };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en PeticionesService.createSolicitudEnvio:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 // ================================
@@ -429,6 +565,37 @@ class PeticionesController {
       console.error('Error en PeticionesController.createSolicitudCuadro:', error);
       return c.json({
         error: 'No se pudo crear la solicitud',
+        details: error.message
+      }, 500);
+    }
+  }
+
+  static async createSolicitudEnvio(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const data: CreateSolicitudEnvioPayload = await c.req.json();
+
+      // Validaciones
+      if (!data.titulo || !data.titulo.trim()) {
+        return c.json({ error: 'El título es obligatorio' }, 400);
+      }
+
+      if (!data.descripcion || !data.descripcion.trim()) {
+        return c.json({ error: 'La descripción es obligatoria' }, 400);
+      }
+
+      const result = await PeticionesService.createSolicitudEnvio(user.userId, data);
+
+      return c.json(result, 201);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.createSolicitudEnvio:', error);
+      return c.json({
+        error: 'No se pudo crear la solicitud de envío',
         details: error.message
       }, 500);
     }
@@ -573,5 +740,8 @@ peticionesRoutes.patch('/peticiones/:id/archive', PeticionesController.toggleArc
 
 // Ruta para crear solicitud de cuadro eléctrico
 peticionesRoutes.post('/peticiones/cuadro-electrico', PeticionesController.createSolicitudCuadro);
+
+// Ruta para crear solicitud de envío
+peticionesRoutes.post('/peticiones/envio', PeticionesController.createSolicitudEnvio);
 
 export { PeticionesController };
