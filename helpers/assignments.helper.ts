@@ -255,28 +255,55 @@ class AssignmentService {
    */
   static async getUserAssignedCards(userId: number): Promise<any[]> {
     const query = `
-      SELECT 
-        c.id as card_id,
-        c.title as card_title,
+      SELECT
+        c.id,
+        c.title,
         c.description,
         c.image_url,
         c.start_date,
         c.due_date,
+        c.progress,
+        c.proyecto_id,
         l.id as list_id,
-        l.title as list_title,
+        l.title as list_name,
         b.id as board_id,
         b.name as board_name,
-        ca.assigned_at
+        p.codigo as proyecto_codigo,
+        p.nombre_proyecto as proyecto_nombre,
+        ca.assigned_at,
+        ca.workload_hours
       FROM card_assignments ca
       INNER JOIN cards c ON ca.card_id = c.id
       INNER JOIN lists l ON c.list_id = l.id
       INNER JOIN boards b ON l.board_id = b.id
+      LEFT JOIN proyectos p ON c.proyecto_id = p.id
       WHERE ca.user_id = $1
       ORDER BY ca.assigned_at DESC
     `;
 
     const result = await pool.query(query, [userId]);
-    return result.rows;
+
+    // Formatear los resultados para incluir el objeto proyecto si existe
+    return result.rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      image_url: row.image_url,
+      start_date: row.start_date,
+      due_date: row.due_date,
+      progress: row.progress,
+      list_id: row.list_id,
+      list_name: row.list_name,
+      board_id: row.board_id,
+      board_name: row.board_name,
+      assigned_at: row.assigned_at,
+      workload_hours: row.workload_hours,
+      proyecto: row.proyecto_id ? {
+        id: row.proyecto_id,
+        codigo: row.proyecto_codigo,
+        nombre_proyecto: row.proyecto_nombre
+      } : null
+    }));
   }
 
   /**
