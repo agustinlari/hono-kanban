@@ -3,13 +3,13 @@ import { pool } from '../config/database';
 
 export interface NotificationPreference {
   id: number;
-  user_id: number;
-  notification_type: string;
-  email_enabled: boolean;
-  in_app_enabled: boolean;
-  board_id: number | null;
-  created_at: Date;
-  updated_at: Date;
+  userId: number;
+  notificationType: string;
+  emailEnabled: boolean;
+  inAppEnabled: boolean;
+  boardId: number | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type NotificationType =
@@ -41,7 +41,20 @@ export class NotificationPreferenceService {
       const params = boardId ? [userId, notificationType, boardId] : [userId, notificationType];
       const result = await client.query(query, params);
 
-      return result.rows[0] || null;
+      if (!result.rows[0]) return null;
+
+      // Transformar snake_case a camelCase
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        userId: row.user_id,
+        notificationType: row.notification_type,
+        emailEnabled: row.email_enabled,
+        inAppEnabled: row.in_app_enabled,
+        boardId: row.board_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
     } finally {
       client.release();
     }
@@ -58,7 +71,7 @@ export class NotificationPreferenceService {
     const preference = await this.getUserPreference(userId, notificationType, boardId);
 
     // Si no existe preferencia, por defecto los emails están deshabilitados
-    return preference?.email_enabled || false;
+    return preference?.emailEnabled || false;
   }
 
   /**
@@ -71,7 +84,17 @@ export class NotificationPreferenceService {
         'SELECT * FROM notification_preferences WHERE user_id = $1 ORDER BY notification_type, board_id',
         [userId]
       );
-      return result.rows;
+      // Transformar snake_case a camelCase para el frontend
+      return result.rows.map(row => ({
+        id: row.id,
+        userId: row.user_id,
+        notificationType: row.notification_type,
+        emailEnabled: row.email_enabled,
+        inAppEnabled: row.in_app_enabled,
+        boardId: row.board_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
     } finally {
       client.release();
     }
@@ -89,28 +112,71 @@ export class NotificationPreferenceService {
   ): Promise<NotificationPreference> {
     const client = await pool.connect();
     try {
-      const query = `
-        INSERT INTO notification_preferences (user_id, notification_type, email_enabled, in_app_enabled, board_id)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (user_id, notification_type, board_id)
-        DO UPDATE SET
-          email_enabled = $3,
-          in_app_enabled = $4,
-          updated_at = NOW()
+      const normalizedBoardId = boardId || null;
+
+      // Primero intentar actualizar
+      const updateQuery = `
+        UPDATE notification_preferences
+        SET email_enabled = $3,
+            in_app_enabled = $4,
+            updated_at = NOW()
+        WHERE user_id = $1
+          AND notification_type = $2
+          AND (board_id = $5 OR (board_id IS NULL AND $5 IS NULL))
         RETURNING *
       `;
 
-      const result = await client.query(query, [
+      const updateResult = await client.query(updateQuery, [
         userId,
         notificationType,
         emailEnabled,
         inAppEnabled,
-        boardId || null
+        normalizedBoardId
       ]);
 
-      console.log(`✅ [NotificationPreferences] Preferencia actualizada para user ${userId}: ${notificationType} = ${emailEnabled ? 'Email ON' : 'Email OFF'}`);
+      if (updateResult.rowCount && updateResult.rowCount > 0) {
+        console.log(`✅ [NotificationPreferences] Preferencia actualizada para user ${userId}: ${notificationType} = ${emailEnabled ? 'Email ON' : 'Email OFF'}`);
+        const row = updateResult.rows[0];
+        return {
+          id: row.id,
+          userId: row.user_id,
+          notificationType: row.notification_type,
+          emailEnabled: row.email_enabled,
+          inAppEnabled: row.in_app_enabled,
+          boardId: row.board_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        };
+      }
 
-      return result.rows[0];
+      // Si no se actualizó nada, insertar nuevo registro
+      const insertQuery = `
+        INSERT INTO notification_preferences (user_id, notification_type, email_enabled, in_app_enabled, board_id)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+      `;
+
+      const insertResult = await client.query(insertQuery, [
+        userId,
+        notificationType,
+        emailEnabled,
+        inAppEnabled,
+        normalizedBoardId
+      ]);
+
+      console.log(`✅ [NotificationPreferences] Preferencia creada para user ${userId}: ${notificationType} = ${emailEnabled ? 'Email ON' : 'Email OFF'}`);
+
+      const row = insertResult.rows[0];
+      return {
+        id: row.id,
+        userId: row.user_id,
+        notificationType: row.notification_type,
+        emailEnabled: row.email_enabled,
+        inAppEnabled: row.in_app_enabled,
+        boardId: row.board_id,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
     } finally {
       client.release();
     }
