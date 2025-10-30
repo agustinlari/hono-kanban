@@ -115,6 +115,58 @@ class AssignmentService {
         } catch (notifError) {
           console.error(`❌ [ASSIGNMENT] Error creando notificación de asignación:`, notifError);
         }
+
+        // Verificar si el usuario tiene emails habilitados para este tipo de notificación
+        console.log(`📧 [ASSIGNMENT] Verificando preferencias de email para usuario ${userId}`);
+        try {
+          const { NotificationPreferenceService } = await import('./notification-preferences.helper');
+          const emailEnabled = await NotificationPreferenceService.isEmailEnabled(userId, 'card_assigned');
+
+          if (emailEnabled) {
+            console.log(`📧 [ASSIGNMENT] Email habilitado, enviando notificación por email`);
+
+            // Obtener información adicional para el email
+            const cardQuery = await client.query(
+              `SELECT c.title, c.id, l.board_id, b.name as board_name
+               FROM cards c
+               JOIN lists l ON c.list_id = l.id
+               JOIN boards b ON l.board_id = b.id
+               WHERE c.id = $1`,
+              [cardId]
+            );
+
+            const assignerQuery = await client.query(
+              'SELECT name, email FROM usuarios WHERE id = $1',
+              [assignedBy]
+            );
+
+            if (cardQuery.rowCount && cardQuery.rowCount > 0 && assignerQuery.rowCount && assignerQuery.rowCount > 0) {
+              const cardData = cardQuery.rows[0];
+              const assignerData = assignerQuery.rows[0];
+
+              const { emailService } = await import('../services/email.service');
+              const { emailSettings } = await import('../config/email.config');
+
+              const cardUrl = `${emailSettings.appUrl}/kanban/board/${cardData.board_id}?card=${cardId}`;
+
+              await emailService.sendCardAssignedNotification({
+                userEmail: userData.email,
+                userName: assignedUserName,
+                cardTitle: cardData.title,
+                boardName: cardData.board_name,
+                cardUrl: cardUrl,
+                assignedBy: assignerData.name || assignerData.email
+              });
+
+              console.log(`✅ [ASSIGNMENT] Email enviado exitosamente a ${userData.email}`);
+            }
+          } else {
+            console.log(`⏭️ [ASSIGNMENT] Email deshabilitado para usuario ${userId}`);
+          }
+        } catch (emailError) {
+          console.error(`❌ [ASSIGNMENT] Error enviando email de asignación:`, emailError);
+          // No fallar la operación si el email falla
+        }
       } else {
         console.log(`⏭️ [ASSIGNMENT] No se crea notificación (usuario se asigna a sí mismo)`);
       }

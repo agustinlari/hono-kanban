@@ -209,7 +209,7 @@ export class NotificationPreferenceService {
  */
 export class NotificationPreferenceController {
   /**
-   * GET /api/notification-preferences
+   * GET /notification-preferences
    * Obtener preferencias del usuario autenticado
    */
   static async getMyPreferences(c: Context) {
@@ -227,7 +227,7 @@ export class NotificationPreferenceController {
   }
 
   /**
-   * PUT /api/notification-preferences
+   * PUT /notification-preferences
    * Actualizar preferencias del usuario
    */
   static async updateMyPreferences(c: Context) {
@@ -252,7 +252,7 @@ export class NotificationPreferenceController {
   }
 
   /**
-   * POST /api/test-email
+   * POST /test-email
    * Enviar email de prueba
    */
   static async sendTestEmail(c: Context) {
@@ -296,6 +296,6 @@ export const notificationPreferenceRoutes = new Hono<{ Variables: Variables }>()
 notificationPreferenceRoutes.use('*', keycloakAuthMiddleware);
 
 // Rutas
-notificationPreferenceRoutes.get('/api/notification-preferences', NotificationPreferenceController.getMyPreferences);
-notificationPreferenceRoutes.put('/api/notification-preferences', NotificationPreferenceController.updateMyPreferences);
-notificationPreferenceRoutes.post('/api/test-email', NotificationPreferenceController.sendTestEmail);
+notificationPreferenceRoutes.get('/notification-preferences', NotificationPreferenceController.getMyPreferences);
+notificationPreferenceRoutes.put('/notification-preferences', NotificationPreferenceController.updateMyPreferences);
+notificationPreferenceRoutes.post('/test-email', NotificationPreferenceController.sendTestEmail);
