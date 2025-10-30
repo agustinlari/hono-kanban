@@ -261,6 +261,58 @@ class CardService {
                   const { NotificationService } = await import('./notifications.helper');
                   await NotificationService.createNotificationWithClient(client, assigneeData.user_id, activityId, description);
                   console.log(`✅ [CardService.updateCard] Notificación creada para usuario ${assigneeData.user_id}`);
+
+                  // Verificar si el usuario tiene emails habilitados para este tipo de notificación
+                  console.log(`📧 [CardService] Verificando preferencias de email para usuario ${assigneeData.user_id}`);
+                  try {
+                    const { NotificationPreferenceService } = await import('./notification-preferences.helper');
+                    const emailEnabled = await NotificationPreferenceService.isEmailEnabled(assigneeData.user_id, 'card_assigned');
+
+                    if (emailEnabled) {
+                      console.log(`📧 [CardService] Email habilitado, enviando notificación por email`);
+
+                      // Obtener información adicional para el email
+                      const cardQuery = await client.query(
+                        `SELECT c.title, c.id, l.board_id, b.name as board_name
+                         FROM cards c
+                         JOIN lists l ON c.list_id = l.id
+                         JOIN boards b ON l.board_id = b.id
+                         WHERE c.id = $1`,
+                        [id]
+                      );
+
+                      const assignerQuery = await client.query(
+                        'SELECT name, email FROM usuarios WHERE id = $1',
+                        [userId]
+                      );
+
+                      if (cardQuery.rowCount && cardQuery.rowCount > 0 && assignerQuery.rowCount && assignerQuery.rowCount > 0) {
+                        const cardData = cardQuery.rows[0];
+                        const assignerData = assignerQuery.rows[0];
+
+                        const { emailService } = await import('../services/email.service');
+                        const { emailSettings } = await import('../config/email.config');
+
+                        const cardUrl = `${emailSettings.appUrl}/kanban/board/${cardData.board_id}?card=${id}`;
+
+                        await emailService.sendCardAssignedNotification({
+                          userEmail: userData.email,
+                          userName: assignedUserName,
+                          cardTitle: cardData.title,
+                          boardName: cardData.board_name,
+                          cardUrl: cardUrl,
+                          assignedBy: assignerData.name || assignerData.email
+                        });
+
+                        console.log(`✅ [CardService] Email enviado exitosamente a ${userData.email}`);
+                      }
+                    } else {
+                      console.log(`⏭️ [CardService] Email deshabilitado para usuario ${assigneeData.user_id}`);
+                    }
+                  } catch (emailError) {
+                    console.error(`❌ [CardService] Error enviando email de asignación:`, emailError);
+                    // No fallar la operación si el email falla
+                  }
                 } catch (notifError) {
                   console.error(`❌ [CardService.updateCard] Error creando notificación:`, notifError);
                 }
