@@ -813,12 +813,17 @@ class CardService {
       projectIds?: number[];
       boardIds?: number[];
       userIds?: number[];
+      labelIds?: number[];
       hideCompleted?: boolean;
+      startDateFrom?: string;
+      startDateTo?: string;
+      dueDateFrom?: string;
+      dueDateTo?: string;
     }
   ): Promise<any[]> {
     const client = await pool.connect();
     try {
-      const { searchTerm, projectIds, boardIds, userIds, hideCompleted } = filters;
+      const { searchTerm, projectIds, boardIds, userIds, labelIds, hideCompleted, startDateFrom, startDateTo, dueDateFrom, dueDateTo } = filters;
 
       // Query base que incluye joins con proyectos, usuarios asignados y tableros
       let query = `
@@ -906,6 +911,44 @@ class CardService {
           WHERE ca2.card_id = c.id AND ca2.user_id = ANY($${paramIndex})
         )`;
         params.push(userIds);
+        paramIndex++;
+      }
+
+      // Filtro por labels
+      if (labelIds && labelIds.length > 0) {
+        query += ` AND EXISTS (
+          SELECT 1 FROM card_labels cl2
+          WHERE cl2.card_id = c.id AND cl2.label_id = ANY($${paramIndex})
+        )`;
+        params.push(labelIds);
+        paramIndex++;
+      }
+
+      // Filtro por fecha de inicio (desde)
+      if (startDateFrom) {
+        query += ` AND c.start_date >= $${paramIndex}`;
+        params.push(startDateFrom);
+        paramIndex++;
+      }
+
+      // Filtro por fecha de inicio (hasta)
+      if (startDateTo) {
+        query += ` AND c.start_date <= $${paramIndex}`;
+        params.push(startDateTo);
+        paramIndex++;
+      }
+
+      // Filtro por fecha de vencimiento (desde)
+      if (dueDateFrom) {
+        query += ` AND c.due_date >= $${paramIndex}`;
+        params.push(dueDateFrom);
+        paramIndex++;
+      }
+
+      // Filtro por fecha de vencimiento (hasta)
+      if (dueDateTo) {
+        query += ` AND c.due_date <= $${paramIndex}`;
+        params.push(dueDateTo);
         paramIndex++;
       }
 
@@ -1161,19 +1204,30 @@ class CardController {
       const projectIdsParam = c.req.query('projectIds');
       const boardIdsParam = c.req.query('boardIds');
       const userIdsParam = c.req.query('userIds');
+      const labelIdsParam = c.req.query('labelIds');
       const hideCompleted = c.req.query('hideCompleted') === 'true';
+      const startDateFrom = c.req.query('startDateFrom');
+      const startDateTo = c.req.query('startDateTo');
+      const dueDateFrom = c.req.query('dueDateFrom');
+      const dueDateTo = c.req.query('dueDateTo');
 
       // Parsear arrays de IDs
       const projectIds = projectIdsParam ? projectIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
       const boardIds = boardIdsParam ? boardIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
       const userIds = userIdsParam ? userIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
+      const labelIds = labelIdsParam ? labelIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
 
       console.log('🔍 [CardController.search] Filtros recibidos:', {
         searchTerm,
         projectIds,
         boardIds,
         userIds,
-        hideCompleted
+        labelIds,
+        hideCompleted,
+        startDateFrom,
+        startDateTo,
+        dueDateFrom,
+        dueDateTo
       });
 
       const cards = await CardService.searchCards(user.userId, {
@@ -1181,7 +1235,12 @@ class CardController {
         projectIds,
         boardIds,
         userIds,
-        hideCompleted
+        labelIds,
+        hideCompleted,
+        startDateFrom,
+        startDateTo,
+        dueDateFrom,
+        dueDateTo
       });
 
       return c.json(cards, 200);
