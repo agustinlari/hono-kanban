@@ -802,6 +802,139 @@ class CardService {
       client.release();
     }
   }
+
+  /**
+   * Busca tarjetas en todos los tableros accesibles por el usuario
+   */
+  static async searchCards(
+    userId: number,
+    filters: {
+      searchTerm?: string;
+      projectIds?: number[];
+      boardIds?: number[];
+      userIds?: number[];
+      hideCompleted?: boolean;
+    }
+  ): Promise<any[]> {
+    const client = await pool.connect();
+    try {
+      const { searchTerm, projectIds, boardIds, userIds, hideCompleted } = filters;
+
+      // Query base que incluye joins con proyectos, usuarios asignados y tableros
+      let query = `
+        SELECT DISTINCT
+          c.id,
+          c.title,
+          c.description,
+          c.list_id,
+          c.position,
+          c.progress,
+          c.start_date,
+          c.due_date,
+          c.proyecto_id,
+          l.title as list_title,
+          l.board_id,
+          b.name as board_name,
+          p.nombre_proyecto,
+          p.codigo as proyecto_codigo,
+          p.cadena as proyecto_cadena,
+          p.inmueble as proyecto_inmueble,
+          COALESCE(
+            jsonb_agg(
+              DISTINCT jsonb_build_object(
+                'id', u.id,
+                'name', u.name
+              )
+            ) FILTER (WHERE u.id IS NOT NULL),
+            '[]'::jsonb
+          ) as assigned_users,
+          COALESCE(
+            jsonb_agg(
+              DISTINCT jsonb_build_object(
+                'id', lb.id,
+                'name', lb.name,
+                'color', lb.color
+              )
+            ) FILTER (WHERE lb.id IS NOT NULL),
+            '[]'::jsonb
+          ) as labels
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        LEFT JOIN usuarios u ON ca.user_id = u.id
+        LEFT JOIN card_labels cl ON c.id = cl.card_id
+        LEFT JOIN labels lb ON cl.label_id = lb.id
+        WHERE EXISTS (
+          SELECT 1 FROM board_members bm
+          WHERE bm.board_id = b.id AND bm.user_id = $1
+        )
+      `;
+
+      const params: any[] = [userId];
+      let paramIndex = 2;
+
+      // Filtro de búsqueda de texto
+      if (searchTerm && searchTerm.trim()) {
+        query += ` AND (
+          c.title ILIKE $${paramIndex} OR
+          c.description ILIKE $${paramIndex}
+        )`;
+        params.push(`%${searchTerm.trim()}%`);
+        paramIndex++;
+      }
+
+      // Filtro por proyectos
+      if (projectIds && projectIds.length > 0) {
+        query += ` AND c.proyecto_id = ANY($${paramIndex})`;
+        params.push(projectIds);
+        paramIndex++;
+      }
+
+      // Filtro por tableros
+      if (boardIds && boardIds.length > 0) {
+        query += ` AND b.id = ANY($${paramIndex})`;
+        params.push(boardIds);
+        paramIndex++;
+      }
+
+      // Filtro por usuarios asignados
+      if (userIds && userIds.length > 0) {
+        query += ` AND EXISTS (
+          SELECT 1 FROM card_assignments ca2
+          WHERE ca2.card_id = c.id AND ca2.user_id = ANY($${paramIndex})
+        )`;
+        params.push(userIds);
+        paramIndex++;
+      }
+
+      // Filtro para ocultar completadas
+      if (hideCompleted) {
+        query += ` AND (c.progress IS NULL OR c.progress < 100)`;
+      }
+
+      query += `
+        GROUP BY c.id, l.title, l.board_id, b.name, p.nombre_proyecto, p.codigo, p.cadena, p.inmueble
+        ORDER BY c.id DESC
+        LIMIT 100
+      `;
+
+      console.log('🔍 [SearchCards] Query:', query);
+      console.log('🔍 [SearchCards] Params:', params);
+
+      const result = await client.query(query, params);
+
+      console.log('✅ [SearchCards] Resultados encontrados:', result.rows.length);
+
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error en CardService.searchCards:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 // ================================
@@ -1014,6 +1147,49 @@ class CardController {
       return c.json({ error: 'No se pudieron obtener los proyectos' }, 500);
     }
   }
+
+  /**
+   * Busca tarjetas en todos los tableros accesibles por el usuario
+   */
+  static async search(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      // Obtener parámetros de query
+      const searchTerm = c.req.query('searchTerm');
+      const projectIdsParam = c.req.query('projectIds');
+      const boardIdsParam = c.req.query('boardIds');
+      const userIdsParam = c.req.query('userIds');
+      const hideCompleted = c.req.query('hideCompleted') === 'true';
+
+      // Parsear arrays de IDs
+      const projectIds = projectIdsParam ? projectIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
+      const boardIds = boardIdsParam ? boardIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
+      const userIds = userIdsParam ? userIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
+
+      console.log('🔍 [CardController.search] Filtros recibidos:', {
+        searchTerm,
+        projectIds,
+        boardIds,
+        userIds,
+        hideCompleted
+      });
+
+      const cards = await CardService.searchCards(user.userId, {
+        searchTerm,
+        projectIds,
+        boardIds,
+        userIds,
+        hideCompleted
+      });
+
+      return c.json(cards, 200);
+    } catch (error: any) {
+      console.error('❌ Error en CardController.search:', error);
+      return c.json({ error: 'Error al buscar tarjetas', details: error.message }, 500);
+    }
+  }
 }
 
 // ================================
@@ -1032,3 +1208,6 @@ cardRoutes.patch('/cards/move-to-board', requirePermission(PermissionAction.MOVE
 
 // Endpoint para obtener proyectos disponibles
 cardRoutes.get('/cards/projects', CardController.getProjects);
+
+// Endpoint para buscar tarjetas en todos los tableros
+cardRoutes.get('/cards/search', CardController.search);
