@@ -18,6 +18,10 @@ export interface DashboardMetrics {
   tasks: {
     avgTime: string;
     oldestInProgress: string;
+    notStarted: number;
+    inProgress: number;
+    completed: number;
+    unassigned: number;
   };
   team: {
     workloadRatio: string;
@@ -218,6 +222,63 @@ class DashboardService {
       const weeklyCapacity = userCount * 40; // 40 horas/semana por usuario
       const workloadRatio = weeklyCapacity > 0 ? `${((totalWorkload / weeklyCapacity) * 100).toFixed(0)}%` : '0%';
 
+      // Conteo de tareas por estado
+      const tasksStatusQuery = `
+        SELECT
+          COUNT(CASE WHEN c.progress = 0 OR c.progress IS NULL THEN 1 END) as not_started,
+          COUNT(CASE WHEN c.progress > 0 AND c.progress < 100 THEN 1 END) as in_progress,
+          COUNT(CASE WHEN c.progress = 100 THEN 1 END) as completed
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          ${projectFilter}
+          ${boardFilter}
+          ${userFilter}
+      `;
+      const tasksStatusResult = await pool.query(tasksStatusQuery, params);
+      const notStarted = parseInt(tasksStatusResult.rows[0]?.not_started || '0');
+      const inProgress = parseInt(tasksStatusResult.rows[0]?.in_progress || '0');
+      const completedTasks = parseInt(tasksStatusResult.rows[0]?.completed || '0');
+
+      // Conteo de tareas sin asignaciones (independiente del filtro de usuario)
+      const unassignedParams: any[] = [userId];
+      let unassignedParamIndex = 2;
+      let unassignedProjectFilter = '';
+      let unassignedBoardFilter = '';
+
+      if (filters?.projectIds && filters.projectIds.length > 0) {
+        unassignedProjectFilter = ` AND c.proyecto_id = ANY($${unassignedParamIndex})`;
+        unassignedParams.push(filters.projectIds);
+        unassignedParamIndex++;
+      }
+
+      if (filters?.boardIds && filters.boardIds.length > 0) {
+        unassignedBoardFilter = ` AND b.id = ANY($${unassignedParamIndex})`;
+        unassignedParams.push(filters.boardIds);
+        unassignedParamIndex++;
+      }
+
+      const unassignedQuery = `
+        SELECT COUNT(DISTINCT c.id) as unassigned
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND ca.card_id IS NULL
+          ${unassignedProjectFilter}
+          ${unassignedBoardFilter}
+      `;
+
+      const unassignedResult = await pool.query(unassignedQuery, unassignedParams);
+      const unassignedTasks = parseInt(unassignedResult.rows[0]?.unassigned || '0');
+
       return {
         projects: {
           active: activeProjects,
@@ -226,7 +287,11 @@ class DashboardService {
         },
         tasks: {
           avgTime: avgTaskTime,
-          oldestInProgress: oldestTaskInProgress
+          oldestInProgress: oldestTaskInProgress,
+          notStarted: notStarted,
+          inProgress: inProgress,
+          completed: completedTasks,
+          unassigned: unassignedTasks
         },
         team: {
           workloadRatio: workloadRatio
