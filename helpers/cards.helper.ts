@@ -935,6 +935,7 @@ class CardService {
           c.start_date,
           c.due_date,
           c.proyecto_id,
+          c.peticion_id,
           l.title as list_title,
           l.board_id,
           b.name as board_name,
