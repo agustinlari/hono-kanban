@@ -279,7 +279,7 @@ export const projectsRoutes = new Hono<{ Variables: Variables }>();
  * GET /api/projects
  * Obtiene todos los proyectos
  */
-projectsRoutes.get('/api/projects', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+projectsRoutes.get('/projects', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -305,7 +305,7 @@ projectsRoutes.get('/api/projects', keycloakAuthMiddleware, async (c: Context<{ 
  * GET /api/projects/:id
  * Obtiene un proyecto por ID
  */
-projectsRoutes.get('/api/projects/:id', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+projectsRoutes.get('/projects/:id', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -343,7 +343,7 @@ projectsRoutes.get('/api/projects/:id', keycloakAuthMiddleware, async (c: Contex
  * POST /api/projects
  * Crea un nuevo proyecto
  */
-projectsRoutes.post('/api/projects', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+projectsRoutes.post('/projects', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
@@ -379,7 +379,7 @@ projectsRoutes.post('/api/projects', keycloakAuthMiddleware, async (c: Context<{
  * PUT /api/projects/:id
  * Actualiza un proyecto existente
  */
-projectsRoutes.put('/api/projects/:id', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
+projectsRoutes.put('/projects/:id', keycloakAuthMiddleware, async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
