@@ -856,6 +856,52 @@ class CardService {
   }
 
   /**
+   * Obtiene metadata de filtros (usuarios y labels) de forma eficiente
+   */
+  static async getFilterMetadata(userId: number): Promise<{ users: any[], labels: any[] }> {
+    const client = await pool.connect();
+    try {
+      // Obtener usuarios únicos que tienen tarjetas asignadas en tableros accesibles
+      const usersQuery = `
+        SELECT DISTINCT u.id, u.name
+        FROM usuarios u
+        INNER JOIN card_assignments ca ON u.id = ca.user_id
+        INNER JOIN cards c ON ca.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        LEFT JOIN board_members bm ON b.id = bm.board_id AND bm.user_id = $1
+        WHERE b.owner_id = $1 OR (bm.can_view = true)
+        ORDER BY u.name ASC
+      `;
+      const usersResult = await client.query(usersQuery, [userId]);
+
+      // Obtener labels únicos de tarjetas en tableros accesibles
+      const labelsQuery = `
+        SELECT DISTINCT l.id, l.name, l.color
+        FROM labels l
+        INNER JOIN card_labels cl ON l.id = cl.label_id
+        INNER JOIN cards c ON cl.card_id = c.id
+        INNER JOIN lists li ON c.list_id = li.id
+        INNER JOIN boards b ON li.board_id = b.id
+        LEFT JOIN board_members bm ON b.id = bm.board_id AND bm.user_id = $1
+        WHERE b.owner_id = $1 OR (bm.can_view = true)
+        ORDER BY l.name ASC
+      `;
+      const labelsResult = await client.query(labelsQuery, [userId]);
+
+      return {
+        users: usersResult.rows,
+        labels: labelsResult.rows
+      };
+    } catch (error) {
+      console.error('Error en CardService.getFilterMetadata:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Busca tarjetas en todos los tableros accesibles por el usuario
    */
   static async searchCards(
@@ -1244,6 +1290,22 @@ class CardController {
   }
 
   /**
+   * Obtiene metadata de filtros (usuarios y labels disponibles)
+   */
+  static async getFilterMetadata(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const metadata = await CardService.getFilterMetadata(user.userId);
+      return c.json(metadata, 200);
+    } catch (error: any) {
+      console.error('Error en CardController.getFilterMetadata:', error);
+      return c.json({ error: 'No se pudo obtener metadata de filtros' }, 500);
+    }
+  }
+
+  /**
    * Busca tarjetas en todos los tableros accesibles por el usuario
    */
   static async search(c: Context) {
@@ -1319,6 +1381,9 @@ cardRoutes.patch('/cards/move-to-board', requirePermission(PermissionAction.MOVE
 
 // Endpoint para obtener proyectos disponibles
 cardRoutes.get('/cards/projects', CardController.getProjects);
+
+// Endpoint para obtener metadata de filtros (usuarios y labels)
+cardRoutes.get('/cards/filter-metadata', CardController.getFilterMetadata);
 
 // Endpoint para buscar tarjetas en todos los tableros
 cardRoutes.get('/cards/search', CardController.search);
