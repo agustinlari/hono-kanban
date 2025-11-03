@@ -187,9 +187,27 @@ class ObrasService {
   static async downloadNewExcelFile(): Promise<{ success: boolean; message: string; fileName?: string }> {
     const { exec } = require('child_process');
     const scraperPath = '/home/osmos/proyectos/svelte-trello/hono-kanban/cvi_downloader';
+    const excelDir = '/home/osmos/proyectos/svelte-trello/hono-kanban/cvi_downloader/descargas_excel';
 
     try {
       console.log(`📥 [OBRAS] Iniciando descarga de nuevo Excel...`);
+
+      // Limpiar archivos Excel antiguos antes de descargar
+      console.log(`🧹 [OBRAS] Limpiando archivos Excel antiguos...`);
+      try {
+        const files = await fs.readdir(excelDir);
+        const excelFiles = files.filter(file => file.endsWith('.xlsx') || file.endsWith('.xls'));
+
+        for (const file of excelFiles) {
+          const filePath = path.join(excelDir, file);
+          await fs.unlink(filePath);
+          console.log(`🗑️ [OBRAS] Archivo eliminado: ${file}`);
+        }
+
+        console.log(`✅ [OBRAS] Limpieza completada. ${excelFiles.length} archivo(s) eliminado(s)`);
+      } catch (cleanError) {
+        console.warn(`⚠️ [OBRAS] Error durante limpieza (no crítico):`, cleanError.message);
+      }
 
       return new Promise((resolve) => {
         exec('./Scrapping', { cwd: scraperPath, timeout: 120000 }, (error, stdout, stderr) => {
