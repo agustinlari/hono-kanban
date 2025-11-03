@@ -921,11 +921,14 @@ class CardService {
       startDateTo?: string;
       dueDateFrom?: string;
       dueDateTo?: string;
+      filterNoDates?: boolean;
+      filterNoProject?: boolean;
+      filterNoUser?: boolean;
     }
   ): Promise<any[]> {
     const client = await pool.connect();
     try {
-      const { searchTerm, projectIds, boardIds, userIds, labelIds, hideCompleted, startDateFrom, startDateTo, dueDateFrom, dueDateTo } = filters;
+      const { searchTerm, projectIds, boardIds, userIds, labelIds, hideCompleted, startDateFrom, startDateTo, dueDateFrom, dueDateTo, filterNoDates, filterNoProject, filterNoUser } = filters;
 
       // Query base que incluye joins con proyectos, usuarios asignados y tableros
       let query = `
@@ -1058,6 +1061,24 @@ class CardService {
       // Filtro para ocultar completadas
       if (hideCompleted) {
         query += ` AND (c.progress IS NULL OR c.progress < 100)`;
+      }
+
+      // Filtro para tarjetas sin fechas asignadas
+      if (filterNoDates) {
+        query += ` AND (c.start_date IS NULL AND c.due_date IS NULL)`;
+      }
+
+      // Filtro para tarjetas sin proyecto asignado
+      if (filterNoProject) {
+        query += ` AND c.proyecto_id IS NULL`;
+      }
+
+      // Filtro para tarjetas sin usuario asignado
+      if (filterNoUser) {
+        query += ` AND NOT EXISTS (
+          SELECT 1 FROM card_assignments ca3
+          WHERE ca3.card_id = c.id
+        )`;
       }
 
       query += `
@@ -1329,6 +1350,9 @@ class CardController {
       const startDateTo = c.req.query('startDateTo');
       const dueDateFrom = c.req.query('dueDateFrom');
       const dueDateTo = c.req.query('dueDateTo');
+      const filterNoDates = c.req.query('filterNoDates') === 'true';
+      const filterNoProject = c.req.query('filterNoProject') === 'true';
+      const filterNoUser = c.req.query('filterNoUser') === 'true';
 
       // Parsear arrays de IDs
       const projectIds = projectIdsParam ? projectIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
@@ -1346,7 +1370,10 @@ class CardController {
         startDateFrom,
         startDateTo,
         dueDateFrom,
-        dueDateTo
+        dueDateTo,
+        filterNoDates,
+        filterNoProject,
+        filterNoUser
       });
 
       const cards = await CardService.searchCards(user.userId, {
@@ -1359,7 +1386,10 @@ class CardController {
         startDateFrom,
         startDateTo,
         dueDateFrom,
-        dueDateTo
+        dueDateTo,
+        filterNoDates,
+        filterNoProject,
+        filterNoUser
       });
 
       return c.json(cards, 200);
