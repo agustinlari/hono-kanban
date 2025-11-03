@@ -63,7 +63,7 @@ export interface CardAttachment {
 // 3. LÓGICA DE SERVICIO
 // =================================================================
 
-class ArchivoService {
+export class ArchivoService {
   private static async ensureUploadDirExists(): Promise<void> {
     try {
       await fs.mkdir(UPLOADS_DIR, { recursive: true });
@@ -498,9 +498,68 @@ class ArchivoService {
     }
   }
 
+  /**
+   * Borra todos los archivos asociados a una tarjeta (archivos físicos y registros en BD)
+   * Debe llamarse antes de borrar la tarjeta para limpiar los archivos huérfanos
+   */
+  static async borrarArchivosDeCard(cardId: string): Promise<void> {
+    const client = await pool.connect();
+    try {
+      // Obtener todos los archivos asociados a esta tarjeta
+      const archivosQuery = `
+        SELECT a.id, a.ruta_relativa
+        FROM archivos a
+        INNER JOIN card_attachments ca ON a.id = ca.archivo_id
+        WHERE ca.card_id = $1
+      `;
+      const archivosResult = await client.query(archivosQuery, [cardId]);
+
+      if (archivosResult.rows.length === 0) {
+        console.log(`No hay archivos asociados a la tarjeta ${cardId}`);
+        return;
+      }
+
+      console.log(`🗑️ Borrando ${archivosResult.rows.length} archivos de la tarjeta ${cardId}`);
+
+      // Borrar cada archivo físico y su registro de la BD
+      for (const archivo of archivosResult.rows) {
+        const rutaCompleta = path.join(UPLOADS_DIR, archivo.ruta_relativa);
+
+        // Intentar borrar el archivo físico
+        try {
+          await fs.unlink(rutaCompleta);
+          console.log(`✅ Archivo físico eliminado: ${rutaCompleta}`);
+        } catch (unlinkError: any) {
+          if (unlinkError.code === 'ENOENT') {
+            console.warn(`⚠️ Archivo físico no encontrado (ya borrado): ${rutaCompleta}`);
+          } else {
+            console.error(`💥 Error al borrar archivo físico ${rutaCompleta}:`, unlinkError);
+            // Continuamos con el siguiente archivo aunque falle este
+          }
+        }
+
+        // Borrar el registro de la BD (esto también borrará la relación en card_attachments por CASCADE)
+        try {
+          await client.query('DELETE FROM archivos WHERE id = $1', [archivo.id]);
+          console.log(`✅ Registro de archivo eliminado de BD: ${archivo.id}`);
+        } catch (dbError) {
+          console.error(`💥 Error al borrar registro de archivo ${archivo.id}:`, dbError);
+          // Continuamos con el siguiente archivo aunque falle este
+        }
+      }
+
+      console.log(`✅ Archivos de la tarjeta ${cardId} eliminados correctamente`);
+    } catch (error) {
+      console.error(`Error general al borrar archivos de la tarjeta ${cardId}:`, error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   static async migrarUrlsImagenes(): Promise<{ migradas: number; errores: number }> {
     console.log('🔄 Iniciando migración de URLs de imágenes...');
-    
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');

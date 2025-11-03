@@ -11,6 +11,7 @@ import type { Card, CreateCardPayload, UpdateCardPayload, MoveCardPayload, MoveC
 import { validateDates, formatDateForDB, parseDate } from '../utils/dateUtils';
 import { ActivityService } from './activity.helper';
 import { SSEService } from './sse.helper';
+import { ArchivoService } from './archivosHelper';
 
 // ================================
 // Lógica de Servicio (CardService)
@@ -462,6 +463,9 @@ class CardService {
         [list_id]
       );
       const boardId = boardIdQuery.rows[0]?.board_id;
+
+      // 2.5. Borrar todos los archivos asociados a la tarjeta (antes de borrar la tarjeta)
+      await ArchivoService.borrarArchivosDeCard(id);
 
       // 3. Borrar la tarjeta.
       await client.query('DELETE FROM cards WHERE id = $1', [id]);
