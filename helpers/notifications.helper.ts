@@ -454,38 +454,42 @@ export class NotificationService {
   }
 
   /**
-   * Extrae menciones (@usuario) de un texto
+   * Extrae menciones del formato @[Nombre](userId) de un texto
+   * Retorna array de userIds mencionados
    */
-  static extractMentions(text: string): string[] {
-    const mentionRegex = /@(\w+)/g;
-    const mentions: string[] = [];
+  static extractMentions(text: string): number[] {
+    // Regex para capturar @[Nombre](userId)
+    const mentionRegex = /@\[[^\]]+\]\((\d+)\)/g;
+    const userIds: number[] = [];
     let match;
 
     while ((match = mentionRegex.exec(text)) !== null) {
-      mentions.push(match[1]);
+      const userId = parseInt(match[1]);
+      if (!isNaN(userId) && !userIds.includes(userId)) {
+        userIds.push(userId);
+      }
     }
 
-    return mentions;
+    return userIds;
   }
 
   /**
-   * Busca usuarios por nombre mencionado y retorna sus IDs
+   * Busca usuarios por IDs mencionados y retorna sus IDs (validación)
+   * Ahora recibe directamente los IDs extraídos de las menciones
    */
-  static async findUsersByMention(mentions: string[]): Promise<number[]> {
-    if (mentions.length === 0) return [];
+  static async findUsersByMention(userIds: number[]): Promise<number[]> {
+    if (userIds.length === 0) return [];
 
     const client = await pool.connect();
     try {
-      // Buscar usuarios cuyo nombre coincida con las menciones (case insensitive)
+      // Verificar que los usuarios existen
       const query = `
         SELECT DISTINCT id
         FROM usuarios
-        WHERE LOWER(name) = ANY($1::text[])
+        WHERE id = ANY($1::int[])
       `;
 
-      const lowerMentions = mentions.map(m => m.toLowerCase());
-      const result = await client.query(query, [lowerMentions]);
-
+      const result = await client.query(query, [userIds]);
       return result.rows.map(row => row.id);
 
     } catch (error) {
