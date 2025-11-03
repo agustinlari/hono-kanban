@@ -76,24 +76,32 @@ export class ActivityService {
       // Importar NotificationService dinámicamente para evitar dependencias circulares
       const { NotificationService } = await import('./notifications.helper');
 
+      console.log(`🔍 Analizando comentario para menciones: "${description}"`);
       const mentions = NotificationService.extractMentions(description);
+      console.log(`🔍 UserIds extraídos de menciones: [${mentions.join(', ')}]`);
 
       if (mentions.length > 0) {
-        console.log(`🔔 Menciones detectadas: ${mentions.join(', ')}`);
+        console.log(`🔔 ${mentions.length} menciones detectadas`);
         const mentionedUserIds = await NotificationService.findUsersByMention(mentions);
+        console.log(`✅ ${mentionedUserIds.length} usuarios validados: [${mentionedUserIds.join(', ')}]`);
 
         // Crear notificaciones para usuarios mencionados (excepto el autor del comentario)
         for (const mentionedUserId of mentionedUserIds) {
           if (mentionedUserId !== userId) {
             try {
+              console.log(`📤 Creando notificación para user_id=${mentionedUserId} (activity_id=${activity.id})`);
               await NotificationService.createNotificationWithClient(client, mentionedUserId, activity.id, description);
-              console.log(`✅ Notificación de mención creada para user_id=${mentionedUserId}`);
+              console.log(`✅ Notificación de mención creada exitosamente para user_id=${mentionedUserId}`);
             } catch (notifError) {
-              console.error(`Error creando notificación para user_id=${mentionedUserId}:`, notifError);
+              console.error(`❌ Error creando notificación para user_id=${mentionedUserId}:`, notifError);
               // No fallar la creación del comentario si falla la notificación
             }
+          } else {
+            console.log(`⏭️ Saltando notificación para el autor del comentario (user_id=${userId})`);
           }
         }
+      } else {
+        console.log(`ℹ️ No se detectaron menciones en el comentario`);
       }
 
       // === NOTIFICACIONES PARA USUARIOS ASIGNADOS ===
