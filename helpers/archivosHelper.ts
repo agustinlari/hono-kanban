@@ -410,26 +410,92 @@ class ArchivoService {
 
   static async verificarEstadoCard(cardId: string): Promise<any> {
     console.log(`Verificando estado de la tarjeta: ${cardId}`);
-    
+
     // Obtener info de la tarjeta
     const cardResult = await pool.query('SELECT id, title, image_url FROM cards WHERE id = $1', [cardId]);
-    
+
     // Obtener attachments
     const attachmentsResult = await pool.query(`
-      SELECT ca.*, a.nombre_original, a.mimetype 
-      FROM card_attachments ca 
-      JOIN archivos a ON ca.archivo_id = a.id 
+      SELECT ca.*, a.nombre_original, a.mimetype
+      FROM card_attachments ca
+      JOIN archivos a ON ca.archivo_id = a.id
       WHERE ca.card_id = $1
     `, [cardId]);
-    
+
     const estado = {
       tarjeta: cardResult.rows[0] || null,
       attachments: attachmentsResult.rows,
       thumbnails: attachmentsResult.rows.filter((a: any) => a.is_thumbnail)
     };
-    
+
     console.log('Estado de la tarjeta:', JSON.stringify(estado, null, 2));
     return estado;
+  }
+
+  static async setArchivoAsThumbnail(cardId: string, archivoId: number): Promise<{ mensaje: string }> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar que el archivo existe y está asociado a la tarjeta
+      const archivoQuery = `
+        SELECT a.*, ca.is_thumbnail
+        FROM archivos a
+        INNER JOIN card_attachments ca ON a.id = ca.archivo_id
+        WHERE a.id = $1 AND ca.card_id = $2
+      `;
+      const archivoResult = await client.query(archivoQuery, [archivoId, cardId]);
+
+      if (archivoResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        throw new Error('Archivo no encontrado o no está asociado a esta tarjeta');
+      }
+
+      const archivo = archivoResult.rows[0];
+
+      // Verificar que es una imagen
+      if (!IMAGE_MIME_TYPES.includes(archivo.mimetype)) {
+        await client.query('ROLLBACK');
+        throw new Error('Solo las imágenes pueden ser establecidas como thumbnail');
+      }
+
+      // Si ya es thumbnail, no hacer nada
+      if (archivo.is_thumbnail) {
+        await client.query('ROLLBACK');
+        return { mensaje: 'Este archivo ya es el thumbnail' };
+      }
+
+      // Desmarcar cualquier otro archivo como thumbnail
+      await client.query(
+        'UPDATE card_attachments SET is_thumbnail = false WHERE card_id = $1 AND is_thumbnail = true',
+        [cardId]
+      );
+
+      // Marcar este archivo como thumbnail
+      await client.query(
+        'UPDATE card_attachments SET is_thumbnail = true WHERE card_id = $1 AND archivo_id = $2',
+        [cardId, archivoId]
+      );
+
+      // Actualizar el image_url de la tarjeta
+      const imageUrl = `/public/kanban-uploads/${archivo.nombre_guardado}`;
+      await client.query(
+        'UPDATE cards SET image_url = $1, updated_at = NOW() WHERE id = $2',
+        [imageUrl, cardId]
+      );
+
+      await client.query('COMMIT');
+      console.log(`✅ Archivo ${archivoId} establecido como thumbnail de tarjeta ${cardId}`);
+
+      return { mensaje: 'Thumbnail actualizado exitosamente' };
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error estableciendo archivo como thumbnail:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   static async migrarUrlsImagenes(): Promise<{ migradas: number; errores: number }> {
@@ -706,10 +772,10 @@ class ArchivoController {
       }
 
       console.log(`🗑️ Eliminando thumbnail de tarjeta ${cardId}:`, image_url);
-      
+
       // Eliminar el archivo físico
       const eliminado = await ArchivoService.eliminarThumbnailPorUrl(image_url);
-      
+
       if (eliminado) {
         return c.json({ mensaje: 'Thumbnail eliminado exitosamente' });
       } else {
@@ -718,6 +784,27 @@ class ArchivoController {
     } catch (error: any) {
       console.error(`Error al eliminar thumbnail de tarjeta ${cardId}:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Error interno al eliminar el thumbnail';
+      return c.json({ error: errorMessage }, 500);
+    }
+  }
+
+  static async setArchivoAsThumbnail(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const cardId = c.req.param('cardId');
+    const archivoId = parseInt(c.req.param('archivoId'));
+
+    if (!cardId || isNaN(archivoId)) {
+      return c.json({ error: 'ID de tarjeta y archivo requeridos' }, 400);
+    }
+
+    try {
+      const resultado = await ArchivoService.setArchivoAsThumbnail(cardId, archivoId);
+      return c.json(resultado);
+    } catch (error: any) {
+      console.error(`Error estableciendo archivo ${archivoId} como thumbnail:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Error interno';
       return c.json({ error: errorMessage }, 500);
     }
   }
@@ -737,6 +824,7 @@ archivoRoutes.delete('/archivos/:id', keycloakAuthMiddleware, ArchivoController.
 // Rutas específicas para tarjetas
 archivoRoutes.get('/cards/:cardId/archivos', keycloakAuthMiddleware, ArchivoController.obtenerArchivosCard);
 archivoRoutes.delete('/cards/:cardId/archivos/:archivoId', keycloakAuthMiddleware, ArchivoController.desvincularArchivoDeCard);
+archivoRoutes.put('/cards/:cardId/archivos/:archivoId/thumbnail', keycloakAuthMiddleware, ArchivoController.setArchivoAsThumbnail);
 archivoRoutes.delete('/cards/:cardId/thumbnail', keycloakAuthMiddleware, ArchivoController.eliminarThumbnailPorUrl);
 archivoRoutes.get('/cards/:cardId/estado', keycloakAuthMiddleware, ArchivoController.verificarEstadoCard);
 
