@@ -391,6 +391,26 @@ class CardService {
         console.log('✅ [CardService.updateCard] Asignaciones actualizadas');
       }
 
+      // Detectar si el progreso cambió y crear actividad automática
+      if (updatedCard && previousCard &&
+          updatedCard.progress !== null &&
+          previousCard.progress !== null &&
+          updatedCard.progress !== previousCard.progress) {
+
+        const previousProgress = Math.round(previousCard.progress);
+        const newProgress = Math.round(updatedCard.progress);
+
+        const progressDescription = `cambió el progreso de ${previousProgress}% a ${newProgress}%`;
+
+        await client.query(
+          `INSERT INTO card_activity (card_id, user_id, activity_type, description)
+           VALUES ($1, $2, 'ACTION', $3)`,
+          [id, userId, progressDescription]
+        );
+
+        console.log(`✅ [CardService] Actividad de cambio de progreso registrada: ${progressDescription}`);
+      }
+
       // Detectar si la tarjeta se completó (progress cambió a 100)
       if (updatedCard && previousCard &&
           updatedCard.progress === 100 &&
