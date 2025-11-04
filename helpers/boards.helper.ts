@@ -34,7 +34,7 @@ class BoardService {
     }
     const boardData = boardResult.rows[0];
 
-    // 2. Obtener todas las listas Y tarjetas de ese tablero con un solo JOIN (incluye proyectos)
+    // 2. Obtener todas las listas Y tarjetas de ese tablero con un solo JOIN (incluye proyectos y peticiones)
     const listsAndCardsQuery = `
       SELECT
         l.id as list_id, l.title as list_title, l.position as list_position,
@@ -44,10 +44,12 @@ class BoardService {
         p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
         p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
         p.numero_obra_osmos as proyecto_numero_obra_osmos, p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
-        p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim
+        p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim,
+        pet.form_data
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
       LEFT JOIN proyectos p ON c.proyecto_id = p.id
+      LEFT JOIN peticiones pet ON c.peticion_id = pet.id
       WHERE l.board_id = $1
       ORDER BY l.position, c.position;
     `;
@@ -179,6 +181,7 @@ class BoardService {
           list_id: row.list_id,
           proyecto_id: row.proyecto_id || null,
           peticion_id: row.peticion_id || null,
+          form_data: row.form_data || null,
           start_date: row.start_date || null,
           due_date: row.due_date || null,
           progress: row.progress ?? null,

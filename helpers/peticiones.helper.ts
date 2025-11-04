@@ -225,6 +225,51 @@ class PeticionesService {
   }
 
   /**
+   * Actualiza los vínculos de una petición
+   */
+  static async updatePeticionVinculos(peticionId: number, vinculos: Link[]) {
+    const client = await pool.connect();
+
+    try {
+      // Obtener form_data actual
+      const getQuery = `
+        SELECT form_data FROM peticiones
+        WHERE id = $1
+      `;
+      const getResult = await client.query(getQuery, [peticionId]);
+
+      if (getResult.rows.length === 0) {
+        throw new Error('Petición no encontrada');
+      }
+
+      // Actualizar solo el campo vínculos en form_data
+      const currentFormData = getResult.rows[0].form_data;
+      const updatedFormData = {
+        ...currentFormData,
+        vinculos
+      };
+
+      // Actualizar form_data
+      const updateQuery = `
+        UPDATE peticiones
+        SET form_data = $1
+        WHERE id = $2
+        RETURNING id, form_data
+      `;
+
+      const result = await client.query(updateQuery, [JSON.stringify(updatedFormData), peticionId]);
+
+      return result.rows[0];
+
+    } catch (error) {
+      console.error('Error en PeticionesService.updatePeticionVinculos:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Archiva o desarchiva una petición
    */
   static async toggleArchivePeticion(peticionId: number, userId: number, archived: boolean) {
@@ -676,6 +721,45 @@ class PeticionesController {
     }
   }
 
+  static async updatePeticionVinculos(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const peticionId = parseInt(c.req.param('id'));
+      if (isNaN(peticionId)) {
+        return c.json({ error: 'ID de petición inválido' }, 400);
+      }
+
+      const { vinculos } = await c.req.json();
+
+      if (!Array.isArray(vinculos)) {
+        return c.json({ error: 'El campo vinculos debe ser un array' }, 400);
+      }
+
+      const result = await PeticionesService.updatePeticionVinculos(peticionId, vinculos);
+
+      return c.json({
+        success: true,
+        peticion: result
+      }, 200);
+
+    } catch (error: any) {
+      console.error('Error en PeticionesController.updatePeticionVinculos:', error);
+
+      if (error.message === 'Petición no encontrada') {
+        return c.json({ error: error.message }, 404);
+      }
+
+      return c.json({
+        error: 'No se pudieron actualizar los vínculos',
+        details: error.message
+      }, 500);
+    }
+  }
+
   static async toggleArchivePeticion(c: Context) {
     try {
       const user = c.get('user');
@@ -737,6 +821,9 @@ peticionesRoutes.get('/peticiones/:id', PeticionesController.getPeticion);
 
 // Ruta para archivar/desarchivar una petición
 peticionesRoutes.patch('/peticiones/:id/archive', PeticionesController.toggleArchivePeticion);
+
+// Ruta para actualizar vínculos de una petición
+peticionesRoutes.patch('/peticiones/:id/vinculos', PeticionesController.updatePeticionVinculos);
 
 // Ruta para crear solicitud de cuadro eléctrico
 peticionesRoutes.post('/peticiones/cuadro-electrico', PeticionesController.createSolicitudCuadro);
