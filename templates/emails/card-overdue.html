@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚠️ Tarjeta vencida: {{cardTitle}}</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f4f5f7;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+    }
+    .header {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      padding: 30px 40px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .content {
+      padding: 40px;
+      color: #172b4d;
+      line-height: 1.6;
+    }
+    .greeting {
+      font-size: 16px;
+      margin-bottom: 20px;
+    }
+    .card-info {
+      background-color: #fef2f2;
+      border-left: 4px solid #ef4444;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #172b4d;
+      margin: 0 0 10px 0;
+    }
+    .board-name {
+      color: #5e6c84;
+      font-size: 14px;
+      margin: 5px 0;
+    }
+    .due-date-info {
+      background-color: #ffffff;
+      border: 2px solid #ef4444;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 15px 0;
+      text-align: center;
+    }
+    .due-date-label {
+      color: #991b1b;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    .due-date-value {
+      color: #dc2626;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .overdue-badge {
+      display: inline-block;
+      background-color: #ef4444;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-top: 10px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background-color: #ef4444;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      margin: 20px 0;
+      transition: background-color 0.2s;
+    }
+    .btn:hover {
+      background-color: #dc2626;
+    }
+    .footer {
+      background-color: #f4f5f7;
+      padding: 20px 40px;
+      text-align: center;
+      color: #5e6c84;
+      font-size: 12px;
+    }
+    .footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    .divider {
+      height: 1px;
+      background-color: #e2e4e6;
+      margin: 20px 0;
+    }
+    .icon {
+      font-size: 20px;
+      margin-right: 5px;
+    }
+    .urgent-box {
+      background-color: #fee2e2;
+      border: 2px solid #ef4444;
+      border-radius: 6px;
+      padding: 16px 20px;
+      margin: 20px 0;
+      font-size: 14px;
+      color: #991b1b;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⚠️ Osmos Kanban</h1>
+    </div>
+    <div class="content">
+      <p class="greeting">Hola <strong>{{userName}}</strong>,</p>
+
+      <p><strong>Atención:</strong> Una tarjeta asignada a ti ha superado su fecha de vencimiento:</p>
+
+      <div class="card-info">
+        <div class="card-title"><span class="icon">📌</span>{{cardTitle}}</div>
+        <div class="board-name">Tablero: {{boardName}}</div>
+
+        <div class="due-date-info">
+          <div class="due-date-label">Venció el</div>
+          <div class="due-date-value">🚨 {{dueDate}}</div>
+          <div class="overdue-badge">⏱️ VENCIDA - {{daysOverdue}}</div>
+        </div>
+      </div>
+
+      <div class="urgent-box">
+        ⚠️ <strong>Acción requerida:</strong> Esta tarjeta requiere tu atención inmediata. Por favor, actualiza su estado o extiende la fecha de vencimiento si es necesario.
+      </div>
+
+      <p>Haz clic en el botón de abajo para gestionar esta tarjeta:</p>
+
+      <a href="{{cardUrl}}" class="btn">Actualizar Tarjeta Ahora</a>
+
+      <p style="color: #5e6c84; font-size: 14px;">
+        Si no puedes hacer clic en el botón, copia y pega este enlace en tu navegador:<br>
+        <a href="{{cardUrl}}" style="color: #667eea; word-break: break-all;">{{cardUrl}}</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>Esta es una notificación automática del sistema Osmos Kanban.</p>
+      <p>
+        <a href="https://aplicaciones.osmos.es/kanban/settings/notifications">Gestionar preferencias de notificaciones</a>
+      </p>
+      <div class="divider"></div>
+      <p>&copy; 2025 Osmos. Todos los derechos reservados.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -37,6 +37,34 @@ export interface CardCommentData {
   commentText: string;
 }
 
+export interface CardDueSoonData {
+  userEmail: string;
+  userName: string;
+  cardTitle: string;
+  boardName: string;
+  cardUrl: string;
+  dueDate: string;
+}
+
+export interface CardOverdueData {
+  userEmail: string;
+  userName: string;
+  cardTitle: string;
+  boardName: string;
+  cardUrl: string;
+  dueDate: string;
+  daysOverdue: string;
+}
+
+export interface CardCompletedData {
+  userEmail: string;
+  userName: string;
+  cardTitle: string;
+  boardName: string;
+  cardUrl: string;
+  completedBy: string;
+}
+
 export class EmailService {
   private transporter: Transporter;
   private templatesDir: string;
@@ -109,6 +137,55 @@ export class EmailService {
     return this.sendEmail({
       to: data.userEmail,
       subject: `Nuevo comentario en ${data.cardTitle}`,
+      html
+    });
+  }
+
+  async sendCardDueSoonNotification(data: CardDueSoonData): Promise<boolean> {
+    const html = await this.loadTemplate('card-due-soon', {
+      userName: data.userName,
+      cardTitle: data.cardTitle,
+      boardName: data.boardName,
+      cardUrl: data.cardUrl,
+      dueDate: data.dueDate
+    });
+
+    return this.sendEmail({
+      to: data.userEmail,
+      subject: `⏰ Recordatorio: ${data.cardTitle} vence pronto`,
+      html
+    });
+  }
+
+  async sendCardOverdueNotification(data: CardOverdueData): Promise<boolean> {
+    const html = await this.loadTemplate('card-overdue', {
+      userName: data.userName,
+      cardTitle: data.cardTitle,
+      boardName: data.boardName,
+      cardUrl: data.cardUrl,
+      dueDate: data.dueDate,
+      daysOverdue: data.daysOverdue
+    });
+
+    return this.sendEmail({
+      to: data.userEmail,
+      subject: `⚠️ Tarjeta vencida: ${data.cardTitle}`,
+      html
+    });
+  }
+
+  async sendCardCompletedNotification(data: CardCompletedData): Promise<boolean> {
+    const html = await this.loadTemplate('card-completed', {
+      userName: data.userName,
+      cardTitle: data.cardTitle,
+      boardName: data.boardName,
+      cardUrl: data.cardUrl,
+      completedBy: data.completedBy
+    });
+
+    return this.sendEmail({
+      to: data.userEmail,
+      subject: `✅ Tarjeta completada: ${data.cardTitle}`,
       html
     });
   }

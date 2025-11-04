@@ -109,6 +109,68 @@ class CardService {
             listId: list_id
           }
         });
+
+        // Enviar notificaciones async (no bloqueante)
+        (async () => {
+          try {
+            // Obtener información del tablero y usuario creador
+            const boardInfoQuery = `SELECT id, name FROM boards WHERE id = $1`;
+            const boardInfoResult = await pool.query(boardInfoQuery, [boardId]);
+
+            if (boardInfoResult.rowCount && boardInfoResult.rowCount > 0) {
+              const boardInfo = boardInfoResult.rows[0];
+
+              // Obtener usuario creador
+              const creatorQuery = `SELECT name, email FROM usuarios WHERE id = $1`;
+              const creatorResult = await pool.query(creatorQuery, [userId]);
+              const creator = creatorResult.rows[0];
+
+              // Obtener miembros del tablero (excepto el creador)
+              const membersQuery = `
+                SELECT DISTINCT u.id, u.email, u.name
+                FROM board_members bm
+                INNER JOIN usuarios u ON bm.user_id = u.id
+                WHERE bm.board_id = $1 AND u.id != $2
+              `;
+              const membersResult = await pool.query(membersQuery, [boardId, userId]);
+
+              const { emailService } = await import('../services/email.service');
+              const { emailSettings } = await import('../config/email.config');
+
+              const cardUrl = `${emailSettings.appUrl}/kanban/home?board=${boardId}&card=${newCard.id}`;
+
+              // Enviar email a cada miembro del tablero
+              for (const member of membersResult.rows) {
+                try {
+                  // Verificar preferencias del usuario
+                  const prefsQuery = `
+                    SELECT email_enabled
+                    FROM notification_preferences
+                    WHERE user_id = $1 AND notification_type = 'card_created_in_board'
+                  `;
+                  const prefsResult = await pool.query(prefsQuery, [member.id]);
+                  const emailEnabled = prefsResult.rows[0]?.email_enabled ?? false;
+
+                  if (emailEnabled) {
+                    await emailService.sendCardCreatedNotification({
+                      userEmail: member.email,
+                      userName: member.name || member.email,
+                      cardTitle: newCard.title,
+                      boardName: boardInfo.name,
+                      cardUrl,
+                      createdBy: creator?.name || creator?.email || 'Usuario'
+                    });
+                    console.log(`✅ [CardService] Email de tarjeta creada enviado a ${member.email}`);
+                  }
+                } catch (emailError) {
+                  console.error(`❌ [CardService] Error enviando email de tarjeta creada:`, emailError);
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`❌ [CardService] Error en notificaciones de tarjeta creada:`, error);
+          }
+        })();
       }
 
       return newCard as Card;
@@ -147,6 +209,10 @@ class CardService {
       
       let updatedCard: Card | null = null;
 
+      // Obtener el estado anterior de la tarjeta para detectar cambios
+      const previousCardResult = await client.query('SELECT * FROM cards WHERE id = $1', [id]);
+      const previousCard = previousCardResult.rows[0];
+
       // Actualizar campos de la tarjeta si hay alguno
       if (fieldsToUpdate.length > 0) {
         const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
@@ -154,15 +220,15 @@ class CardService {
         queryValues.push(id);
 
         const query = `
-          UPDATE cards 
+          UPDATE cards
           SET ${setClause}, updated_at = NOW()
-          WHERE id = $${queryValues.length} 
+          WHERE id = $${queryValues.length}
           RETURNING *;
         `;
-        
+
         console.log('🔍 [CardService.updateCard] Query:', query);
         console.log('🔍 [CardService.updateCard] Values:', queryValues);
-        
+
         try {
           const result = await client.query(query, queryValues);
           if (result.rowCount === 0) {
@@ -323,6 +389,124 @@ class CardService {
         }
 
         console.log('✅ [CardService.updateCard] Asignaciones actualizadas');
+      }
+
+      // Detectar si la tarjeta se completó (progress cambió a 100)
+      if (updatedCard && previousCard &&
+          updatedCard.progress === 100 &&
+          previousCard.progress !== 100) {
+
+        console.log(`✅ [CardService] Tarjeta completada al 100%: ${updatedCard.title}`);
+
+        // Enviar notificaciones async (no bloqueante)
+        (async () => {
+          try {
+            // Obtener información de la tarjeta, tablero y usuario que completó
+            const cardInfoQuery = `
+              SELECT c.id, c.title, b.id as board_id, b.name as board_name
+              FROM cards c
+              INNER JOIN lists l ON c.list_id = l.id
+              INNER JOIN boards b ON l.board_id = b.id
+              WHERE c.id = $1
+            `;
+            const cardInfoResult = await pool.query(cardInfoQuery, [id]);
+
+            if (cardInfoResult.rowCount && cardInfoResult.rowCount > 0) {
+              const cardInfo = cardInfoResult.rows[0];
+
+              // Obtener usuario que completó la tarjeta
+              const completedByQuery = `SELECT name, email FROM usuarios WHERE id = $1`;
+              const completedByResult = await pool.query(completedByQuery, [userId]);
+              const completedByUser = completedByResult.rows[0];
+
+              // Obtener todos los usuarios asignados para notificar
+              const assigneesQuery = `
+                SELECT DISTINCT u.id, u.email, u.name
+                FROM card_assignments ca
+                INNER JOIN usuarios u ON ca.user_id = u.id
+                WHERE ca.card_id = $1 AND u.id != $2
+              `;
+              const assigneesResult = await pool.query(assigneesQuery, [id, userId]);
+
+              // Obtener miembros del tablero que tengan habilitadas las notificaciones
+              const boardMembersQuery = `
+                SELECT DISTINCT u.id, u.email, u.name
+                FROM board_members bm
+                INNER JOIN usuarios u ON bm.user_id = u.id
+                WHERE bm.board_id = $1
+                  AND u.id != $2
+                  AND u.id NOT IN (
+                    SELECT ca.user_id
+                    FROM card_assignments ca
+                    WHERE ca.card_id = $3
+                  )
+              `;
+              const boardMembersResult = await pool.query(boardMembersQuery, [cardInfo.board_id, userId, id]);
+
+              const { emailService } = await import('../services/email.service');
+              const { emailSettings } = await import('../config/email.config');
+
+              const cardUrl = `${emailSettings.appUrl}/kanban/home?board=${cardInfo.board_id}&card=${id}`;
+
+              // Enviar a asignados
+              for (const assignee of assigneesResult.rows) {
+                try {
+                  // Verificar preferencias del usuario
+                  const prefsQuery = `
+                    SELECT email_enabled
+                    FROM notification_preferences
+                    WHERE user_id = $1 AND notification_type = 'card_completed'
+                  `;
+                  const prefsResult = await pool.query(prefsQuery, [assignee.id]);
+                  const emailEnabled = prefsResult.rows[0]?.email_enabled ?? false;
+
+                  if (emailEnabled) {
+                    await emailService.sendCardCompletedNotification({
+                      userEmail: assignee.email,
+                      userName: assignee.name || assignee.email,
+                      cardTitle: cardInfo.title,
+                      boardName: cardInfo.board_name,
+                      cardUrl,
+                      completedBy: completedByUser?.name || completedByUser?.email || 'Usuario'
+                    });
+                    console.log(`✅ [CardService] Email de completado enviado a ${assignee.email}`);
+                  }
+                } catch (emailError) {
+                  console.error(`❌ [CardService] Error enviando email de completado:`, emailError);
+                }
+              }
+
+              // Enviar a miembros del tablero
+              for (const member of boardMembersResult.rows) {
+                try {
+                  const prefsQuery = `
+                    SELECT email_enabled
+                    FROM notification_preferences
+                    WHERE user_id = $1 AND notification_type = 'card_completed'
+                  `;
+                  const prefsResult = await pool.query(prefsQuery, [member.id]);
+                  const emailEnabled = prefsResult.rows[0]?.email_enabled ?? false;
+
+                  if (emailEnabled) {
+                    await emailService.sendCardCompletedNotification({
+                      userEmail: member.email,
+                      userName: member.name || member.email,
+                      cardTitle: cardInfo.title,
+                      boardName: cardInfo.board_name,
+                      cardUrl,
+                      completedBy: completedByUser?.name || completedByUser?.email || 'Usuario'
+                    });
+                    console.log(`✅ [CardService] Email de completado enviado a miembro ${member.email}`);
+                  }
+                } catch (emailError) {
+                  console.error(`❌ [CardService] Error enviando email de completado:`, emailError);
+                }
+              }
+            }
+          } catch (error) {
+            console.error(`❌ [CardService] Error en notificaciones de completado:`, error);
+          }
+        })();
       }
 
       await client.query('COMMIT');

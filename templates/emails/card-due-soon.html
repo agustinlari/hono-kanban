@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tarjeta próxima a vencer: {{cardTitle}}</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f4f5f7;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+    }
+    .header {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      padding: 30px 40px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .content {
+      padding: 40px;
+      color: #172b4d;
+      line-height: 1.6;
+    }
+    .greeting {
+      font-size: 16px;
+      margin-bottom: 20px;
+    }
+    .card-info {
+      background-color: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #172b4d;
+      margin: 0 0 10px 0;
+    }
+    .board-name {
+      color: #5e6c84;
+      font-size: 14px;
+      margin: 5px 0;
+    }
+    .due-date-info {
+      background-color: #ffffff;
+      border: 2px solid #f59e0b;
+      border-radius: 6px;
+      padding: 15px;
+      margin: 15px 0;
+      text-align: center;
+    }
+    .due-date-label {
+      color: #92400e;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    .due-date-value {
+      color: #d97706;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .btn {
+      display: inline-block;
+      padding: 12px 24px;
+      background-color: #f59e0b;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      margin: 20px 0;
+      transition: background-color 0.2s;
+    }
+    .btn:hover {
+      background-color: #d97706;
+    }
+    .footer {
+      background-color: #f4f5f7;
+      padding: 20px 40px;
+      text-align: center;
+      color: #5e6c84;
+      font-size: 12px;
+    }
+    .footer a {
+      color: #667eea;
+      text-decoration: none;
+    }
+    .divider {
+      height: 1px;
+      background-color: #e2e4e6;
+      margin: 20px 0;
+    }
+    .icon {
+      font-size: 20px;
+      margin-right: 5px;
+    }
+    .warning-box {
+      background-color: #fef3c7;
+      border: 1px solid #fbbf24;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin: 20px 0;
+      font-size: 14px;
+      color: #92400e;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>⏰ Osmos Kanban</h1>
+    </div>
+    <div class="content">
+      <p class="greeting">Hola <strong>{{userName}}</strong>,</p>
+
+      <p>Te recordamos que una tarjeta asignada a ti está próxima a vencer:</p>
+
+      <div class="card-info">
+        <div class="card-title"><span class="icon">📌</span>{{cardTitle}}</div>
+        <div class="board-name">Tablero: {{boardName}}</div>
+
+        <div class="due-date-info">
+          <div class="due-date-label">Fecha de vencimiento</div>
+          <div class="due-date-value">⏰ {{dueDate}}</div>
+        </div>
+      </div>
+
+      <div class="warning-box">
+        💡 <strong>Recuerda:</strong> Asegúrate de completar esta tarjeta antes de la fecha límite para mantener el proyecto en el calendario.
+      </div>
+
+      <p>Haz clic en el botón de abajo para ver y actualizar la tarjeta:</p>
+
+      <a href="{{cardUrl}}" class="btn">Ver Tarjeta</a>
+
+      <p style="color: #5e6c84; font-size: 14px;">
+        Si no puedes hacer clic en el botón, copia y pega este enlace en tu navegador:<br>
+        <a href="{{cardUrl}}" style="color: #667eea; word-break: break-all;">{{cardUrl}}</a>
+      </p>
+    </div>
+    <div class="footer">
+      <p>Esta es una notificación automática del sistema Osmos Kanban.</p>
+      <p>
+        <a href="https://aplicaciones.osmos.es/kanban/settings/notifications">Gestionar preferencias de notificaciones</a>
+      </p>
+      <div class="divider"></div>
+      <p>&copy; 2025 Osmos. Todos los derechos reservados.</p>
+    </div>
+  </div>
+</body>
+</html>
