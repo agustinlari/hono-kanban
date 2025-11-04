@@ -147,7 +147,7 @@ class AssignmentService {
               const { emailService } = await import('../services/email.service');
               const { emailSettings } = await import('../config/email.config');
 
-              const cardUrl = `${emailSettings.appUrl}/kanban/home`;
+              const cardUrl = `${emailSettings.appUrl}/kanban/home?board=${cardData.board_id}&card=${cardId}`;
 
               await emailService.sendCardAssignedNotification({
                 userEmail: userData.email,

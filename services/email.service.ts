@@ -43,7 +43,9 @@ export class EmailService {
 
   constructor() {
     this.transporter = createTransporter();
-    this.templatesDir = path.join(__dirname, '../templates/emails');
+    // Usar process.cwd() para obtener el directorio de trabajo actual
+    this.templatesDir = path.join(process.cwd(), 'templates/emails');
+    console.log(`📧 [EmailService] Templates directory: ${this.templatesDir}`);
   }
 
   async sendEmail(data: EmailData): Promise<boolean> {

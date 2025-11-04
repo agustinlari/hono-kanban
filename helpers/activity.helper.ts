@@ -80,6 +80,9 @@ export class ActivityService {
       const mentions = NotificationService.extractMentions(description);
       console.log(`🔍 UserIds extraídos de menciones: [${mentions.join(', ')}]`);
 
+      // Almacenar usuarios mencionados para emails
+      const mentionedForEmail: number[] = [];
+
       if (mentions.length > 0) {
         console.log(`🔔 ${mentions.length} menciones detectadas`);
         const mentionedUserIds = await NotificationService.findUsersByMention(mentions);
@@ -91,6 +94,7 @@ export class ActivityService {
             try {
               console.log(`📤 Creando notificación para user_id=${mentionedUserId} (activity_id=${activity.id})`);
               await NotificationService.createNotificationWithClient(client, mentionedUserId, activity.id, description);
+              mentionedForEmail.push(mentionedUserId);
               console.log(`✅ Notificación de mención creada exitosamente para user_id=${mentionedUserId}`);
             } catch (notifError) {
               console.error(`❌ Error creando notificación para user_id=${mentionedUserId}:`, notifError);
@@ -104,6 +108,69 @@ export class ActivityService {
         console.log(`ℹ️ No se detectaron menciones en el comentario`);
       }
 
+      // === ENVÍO DE EMAILS PARA MENCIONES ===
+      if (mentionedForEmail.length > 0) {
+        // Obtener información de la tarjeta y tablero
+        const cardInfoQuery = `
+          SELECT c.title as card_title, l.board_id, b.name as board_name
+          FROM cards c
+          JOIN lists l ON c.list_id = l.id
+          JOIN boards b ON l.board_id = b.id
+          WHERE c.id = $1
+        `;
+        const cardInfoResult = await client.query(cardInfoQuery, [cardId]);
+        const cardInfo = cardInfoResult.rows[0];
+
+        // Importar servicios de email
+        const { emailService } = await import('../services/email.service');
+        const { emailSettings } = await import('../config/email.config');
+
+        const cardUrl = `${emailSettings.appUrl}/kanban/home?board=${cardInfo.board_id}&card=${cardId}`;
+
+        // Procesar emails de forma asíncrona (sin bloquear)
+        (async () => {
+          for (const mentionedUserId of mentionedForEmail) {
+            try {
+              // Verificar preferencias del usuario para emails de menciones
+              const prefsQuery = `
+                SELECT email_enabled
+                FROM notification_preferences
+                WHERE user_id = $1 AND notification_type = 'card_mentioned'
+              `;
+              const prefsResult = await pool.query(prefsQuery, [mentionedUserId]);
+
+              // Si tiene email_enabled = true o no tiene preferencias (default false)
+              const emailEnabled = prefsResult.rows[0]?.email_enabled ?? false;
+
+              if (emailEnabled) {
+                // Obtener datos del usuario
+                const userQuery = 'SELECT email, COALESCE(name, email) as name FROM usuarios WHERE id = $1';
+                const userResult = await pool.query(userQuery, [mentionedUserId]);
+                const mentionedUser = userResult.rows[0];
+
+                if (mentionedUser) {
+                  await emailService.sendCardCommentNotification({
+                    userEmail: mentionedUser.email,
+                    userName: mentionedUser.name,
+                    cardTitle: cardInfo.card_title,
+                    boardName: cardInfo.board_name,
+                    cardUrl,
+                    commentAuthor: userData.name,
+                    commentText: `Te mencionó en: ${description}`
+                  });
+                  console.log(`✅ [Email] Enviado email de mención a ${mentionedUser.email}`);
+                }
+              } else {
+                console.log(`ℹ️ [Email] Usuario ${mentionedUserId} tiene desactivados emails de menciones`);
+              }
+            } catch (emailError) {
+              console.error(`❌ [Email] Error enviando email de mención a user_id=${mentionedUserId}:`, emailError);
+              // No fallar si hay error en el email
+            }
+          }
+        })().catch(err => console.error('Error en envío asíncrono de emails de mención:', err));
+      }
+
       // === NOTIFICACIONES PARA USUARIOS ASIGNADOS ===
       // Obtener usuarios asignados a la tarjeta
       const assigneesQuery = `
@@ -112,10 +179,14 @@ export class ActivityService {
       `;
       const assigneesResult = await client.query(assigneesQuery, [cardId, userId]);
 
+      // Almacenar usuarios que recibirán notificación (para emails)
+      const notifiedUserIds: number[] = [];
+
       // Crear notificaciones para usuarios asignados (excepto el autor del comentario)
       for (const row of assigneesResult.rows) {
         try {
           await NotificationService.createNotificationWithClient(client, row.user_id, activity.id, description);
+          notifiedUserIds.push(row.user_id);
           console.log(`✅ Notificación de comentario creada para asignado user_id=${row.user_id}`);
         } catch (notifError) {
           console.error(`Error creando notificación para asignado user_id=${row.user_id}:`, notifError);
@@ -123,6 +194,70 @@ export class ActivityService {
       }
 
       await client.query('COMMIT');
+
+      // === ENVÍO DE EMAILS PARA COMENTARIOS ===
+      // Enviar emails después del commit para evitar bloqueos
+      if (notifiedUserIds.length > 0) {
+        // Obtener información de la tarjeta y tablero
+        const cardInfoQuery = `
+          SELECT c.title as card_title, l.board_id, b.name as board_name
+          FROM cards c
+          JOIN lists l ON c.list_id = l.id
+          JOIN boards b ON l.board_id = b.id
+          WHERE c.id = $1
+        `;
+        const cardInfoResult = await client.query(cardInfoQuery, [cardId]);
+        const cardInfo = cardInfoResult.rows[0];
+
+        // Importar servicios de email
+        const { emailService } = await import('../services/email.service');
+        const { emailSettings } = await import('../config/email.config');
+
+        const cardUrl = `${emailSettings.appUrl}/kanban/home?board=${cardInfo.board_id}&card=${cardId}`;
+
+        // Procesar emails de forma asíncrona (sin bloquear)
+        (async () => {
+          for (const notifiedUserId of notifiedUserIds) {
+            try {
+              // Verificar preferencias del usuario para emails de comentarios
+              const prefsQuery = `
+                SELECT email_enabled
+                FROM notification_preferences
+                WHERE user_id = $1 AND notification_type = 'card_comment'
+              `;
+              const prefsResult = await pool.query(prefsQuery, [notifiedUserId]);
+
+              // Si tiene email_enabled = true o no tiene preferencias (default true)
+              const emailEnabled = prefsResult.rows[0]?.email_enabled ?? false;
+
+              if (emailEnabled) {
+                // Obtener datos del usuario
+                const userQuery = 'SELECT email, COALESCE(name, email) as name FROM usuarios WHERE id = $1';
+                const userResult = await pool.query(userQuery, [notifiedUserId]);
+                const notifiedUser = userResult.rows[0];
+
+                if (notifiedUser) {
+                  await emailService.sendCardCommentNotification({
+                    userEmail: notifiedUser.email,
+                    userName: notifiedUser.name,
+                    cardTitle: cardInfo.card_title,
+                    boardName: cardInfo.board_name,
+                    cardUrl,
+                    commentAuthor: userData.name,
+                    commentText: description
+                  });
+                  console.log(`✅ [Email] Enviado email de comentario a ${notifiedUser.email}`);
+                }
+              } else {
+                console.log(`ℹ️ [Email] Usuario ${notifiedUserId} tiene desactivados emails de comentarios`);
+              }
+            } catch (emailError) {
+              console.error(`❌ [Email] Error enviando email a user_id=${notifiedUserId}:`, emailError);
+              // No fallar si hay error en el email
+            }
+          }
+        })().catch(err => console.error('Error en envío asíncrono de emails:', err));
+      }
 
       // Emitir evento SSE de nuevo comentario
       // Obtener board_id desde la tarjeta
