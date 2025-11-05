@@ -18,6 +18,68 @@ import { ArchivoService } from './archivosHelper';
 // ================================
 class CardService {
   /**
+   * Normaliza las posiciones de todas las tarjetas en una lista
+   * Elimina duplicados y huecos, asegurando posiciones secuenciales desde 0
+   *
+   * @param priorityCardId - ID de la tarjeta que debe ir en una posición específica
+   * @param priorityPosition - Posición deseada para la tarjeta prioritaria
+   */
+  private static async normalizePositions(
+    client: any,
+    listId: number,
+    priorityCardId?: string,
+    priorityPosition?: number
+  ): Promise<void> {
+    if (priorityCardId && priorityPosition !== undefined) {
+      // Normalización especial: colocar una tarjeta en una posición específica
+      await client.query(`
+        WITH
+          other_cards_ordered AS (
+            SELECT id, ROW_NUMBER() OVER (ORDER BY position, created_at) - 1 AS seq
+            FROM cards
+            WHERE list_id = $1 AND id != $2
+          ),
+          other_cards_adjusted AS (
+            SELECT
+              id,
+              CASE
+                WHEN seq < $3 THEN seq
+                ELSE seq + 1
+              END AS new_position
+            FROM other_cards_ordered
+          ),
+          priority_card AS (
+            SELECT id, $3 AS new_position
+            FROM cards
+            WHERE id = $2
+          ),
+          all_positions AS (
+            SELECT * FROM other_cards_adjusted
+            UNION ALL
+            SELECT * FROM priority_card
+          )
+        UPDATE cards c
+        SET position = ap.new_position
+        FROM all_positions ap
+        WHERE c.id = ap.id
+      `, [listId, priorityCardId, priorityPosition]);
+    } else {
+      // Normalización simple: ordenar todas por position y created_at
+      await client.query(`
+        WITH ranked AS (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY position, created_at) - 1 AS new_position
+          FROM cards
+          WHERE list_id = $1
+        )
+        UPDATE cards c
+        SET position = r.new_position
+        FROM ranked r
+        WHERE c.id = r.id
+      `, [listId]);
+    }
+  }
+
+  /**
    * Crea una nueva tarjeta en una lista específica.
    * Calcula automáticamente la posición para que se añada al final.
    */
@@ -35,20 +97,17 @@ class CardService {
       }
       const listTitle = listCheck.rows[0].title;
 
-      // 2. Incrementar la posición de todas las tarjetas existentes en esta lista
-      await client.query(
-        'UPDATE cards SET position = position + 1 WHERE list_id = $1',
-        [list_id]
-      );
-
-      // 3. Insertar la nueva tarjeta en la posición 0 (primera posición)
+      // 2. Insertar la nueva tarjeta en la posición -1 (se normalizará a 0 al ser la más baja)
       const query = `
         INSERT INTO cards (title, list_id, position, proyecto_id)
         VALUES ($1, $2, $3, $4) RETURNING *;
       `;
-      const result = await client.query(query, [title, list_id, 0, proyecto_id || null]);
+      const result = await client.query(query, [title, list_id, -1, proyecto_id || null]);
 
       const newCard = result.rows[0];
+
+      // 3. Normalizar posiciones para eliminar duplicados y huecos
+      await CardService.normalizePositions(client, list_id);
 
       // 4. Registrar actividad de creación
       await ActivityService.createActionWithClient(
@@ -648,9 +707,9 @@ class CardService {
     try {
       await client.query('BEGIN');
 
-      // 1. Obtener la list_id y la posición de la tarjeta que vamos a borrar.
+      // 1. Obtener la list_id de la tarjeta que vamos a borrar.
       const cardMetaResult = await client.query(
-        'SELECT list_id, position FROM cards WHERE id = $1',
+        'SELECT list_id FROM cards WHERE id = $1',
         [id]
       );
 
@@ -658,7 +717,7 @@ class CardService {
         await client.query('ROLLBACK');
         return false; // La tarjeta no existe
       }
-      const { list_id, position } = cardMetaResult.rows[0];
+      const { list_id } = cardMetaResult.rows[0];
 
       // 2. Obtener board_id antes de borrar la tarjeta
       const boardIdQuery = await client.query(
@@ -673,12 +732,8 @@ class CardService {
       // 3. Borrar la tarjeta.
       await client.query('DELETE FROM cards WHERE id = $1', [id]);
 
-      // 4. Reordenar las tarjetas restantes en la misma lista.
-      // Todas las tarjetas que estaban después de la borrada, deben retroceder una posición.
-      await client.query(
-        'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2',
-        [list_id, position]
-      );
+      // 4. Normalizar posiciones para eliminar huecos
+      await CardService.normalizePositions(client, list_id);
 
       await client.query('COMMIT');
 
@@ -712,14 +767,14 @@ class CardService {
     try {
       await client.query('BEGIN');
 
-      // 1. Obtener la posición original de la tarjeta que se está moviendo.
-      const cardResult = await client.query('SELECT position FROM cards WHERE id = $1', [cardId]);
+      // 1. Verificar que la tarjeta existe y obtener su posición original
+      const cardResult = await client.query('SELECT id, position FROM cards WHERE id = $1', [cardId]);
       if (cardResult.rowCount === 0) {
         throw new Error('La tarjeta a mover no existe.');
       }
-      const originalIndex = cardResult.rows[0].position;
+      const originalPosition = cardResult.rows[0].position;
 
-      // Obtener nombres de las listas para el registro de actividad
+      // 2. Obtener nombres de las listas para el registro de actividad
       let sourceListTitle = '';
       let targetListTitle = '';
       const needsActivityLog = sourceListId !== targetListId;
@@ -735,53 +790,29 @@ class CardService {
         targetListTitle = targetList?.title || 'Lista destino';
       }
 
-      // CASO A: Mover dentro de la misma lista
-      if (sourceListId === targetListId) {
-        // "Sacar" la tarjeta de su posición actual
-        await client.query(
-          'UPDATE cards SET position = -1 WHERE id = $1',
-          [cardId]
-        );
-
-        // Si se mueve de una posición baja a una alta (ej: 1 -> 3)
-        if (originalIndex < newIndex) {
-          // Las tarjetas entre la posición antigua y la nueva retroceden un lugar.
-          await client.query(
-            'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2 AND position <= $3',
-            [sourceListId, originalIndex, newIndex]
-          );
-        }
-        // Si se mueve de una posición alta a una baja (ej: 3 -> 1)
-        else {
-          // Las tarjetas entre la posición nueva y la antigua avanzan un lugar.
-          await client.query(
-            'UPDATE cards SET position = position + 1 WHERE list_id = $1 AND position >= $2 AND position < $3',
-            [sourceListId, newIndex, originalIndex]
-          );
-        }
-      }
-      // CASO B: Mover a una lista diferente
-      else {
-        // 2a. Cerrar el hueco en la lista de origen.
-        // Todas las tarjetas que estaban después de la movida retroceden una posición.
-        await client.query(
-          'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2',
-          [sourceListId, originalIndex]
-        );
-
-        // 2b. Hacer espacio en la lista de destino.
-        // Todas las tarjetas en o después del nuevo índice avanzan una posición.
-        await client.query(
-          'UPDATE cards SET position = position + 1 WHERE list_id = $1 AND position >= $2',
-          [targetListId, newIndex]
-        );
-      }
-
-      // 3. Finalmente, actualizar la tarjeta movida a su nueva lista y posición.
+      // 3. Mover la tarjeta a su nueva lista (position temporal, se normalizará después)
       await client.query(
-        'UPDATE cards SET list_id = $1, position = $2 WHERE id = $3',
-        [targetListId, newIndex, cardId]
+        'UPDATE cards SET list_id = $1 WHERE id = $2',
+        [targetListId, cardId]
       );
+
+      // 4. Ajustar newIndex si se mueve hacia abajo en la misma lista
+      let adjustedIndex = newIndex;
+      if (sourceListId === targetListId && newIndex > originalPosition) {
+        // Al mover hacia abajo en la misma lista, el índice debe decrementarse
+        // porque la tarjeta original libera un espacio
+        adjustedIndex = newIndex - 1;
+      }
+
+      // 5. Normalizar posiciones en ambas listas
+      if (sourceListId === targetListId) {
+        // Misma lista: normalizar colocando la tarjeta en su nueva posición
+        await CardService.normalizePositions(client, targetListId, cardId, adjustedIndex);
+      } else {
+        // Diferentes listas
+        await CardService.normalizePositions(client, sourceListId); // Normalizar origen
+        await CardService.normalizePositions(client, targetListId, cardId, adjustedIndex); // Normalizar destino con prioridad
+      }
 
       // 4. Registrar actividad solo si la tarjeta cambió de lista
       if (needsActivityLog) {
@@ -948,26 +979,15 @@ class CardService {
         console.log(`✅ Eliminadas ${labelsToRemove.length} etiquetas que no existen en el tablero de destino`);
       }
 
-      // 11. Cerrar el hueco en la lista de origen
-      const positionResult = await client.query('SELECT position FROM cards WHERE id = $1', [cardId]);
-      const originalPosition = positionResult.rows[0].position;
-
+      // 11. Actualizar la tarjeta a la nueva lista (position temporal, se normalizará después)
       await client.query(
-        'UPDATE cards SET position = position - 1 WHERE list_id = $1 AND position > $2',
-        [sourceListId, originalPosition]
+        'UPDATE cards SET list_id = $1 WHERE id = $2',
+        [targetListId, cardId]
       );
 
-      // 12. Hacer espacio en la lista de destino
-      await client.query(
-        'UPDATE cards SET position = position + 1 WHERE list_id = $1 AND position >= $2',
-        [targetListId, newIndex]
-      );
-
-      // 13. Actualizar la tarjeta a la nueva lista y posición
-      await client.query(
-        'UPDATE cards SET list_id = $1, position = $2 WHERE id = $3',
-        [targetListId, newIndex, cardId]
-      );
+      // 12. Normalizar posiciones en ambas listas
+      await CardService.normalizePositions(client, sourceListId);
+      await CardService.normalizePositions(client, targetListId, cardId, newIndex);
 
       // 14. Registrar actividad
       const description = `movió esta tarjeta de "${sourceBoardName}" a "${targetBoardName}"`;
@@ -1167,7 +1187,8 @@ class CardService {
               DISTINCT jsonb_build_object(
                 'id', lb.id,
                 'name', lb.name,
-                'color', lb.color
+                'color', lb.color,
+                'text_color', lb.text_color
               )
             ) FILTER (WHERE lb.id IS NOT NULL),
             '[]'::jsonb
