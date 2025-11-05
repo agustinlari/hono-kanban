@@ -80,7 +80,7 @@ class BoardService {
     const labelsQuery = `
       SELECT
         cl.card_id,
-        l.id as label_id, l.name as label_name, l.color as label_color,
+        l.id as label_id, l.name as label_name, l.color as label_color, l.text_color as label_text_color,
         l.created_at as label_created_at, l.updated_at as label_updated_at
       FROM card_labels cl
       INNER JOIN labels l ON cl.label_id = l.id
@@ -137,6 +137,7 @@ class BoardService {
         board_id: id,
         name: labelRow.label_name,
         color: labelRow.label_color,
+        text_color: labelRow.label_text_color,
         created_at: labelRow.label_created_at,
         updated_at: labelRow.label_updated_at
       });

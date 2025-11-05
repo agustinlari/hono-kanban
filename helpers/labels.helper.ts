@@ -23,9 +23,9 @@ class LabelService {
    */
   static async getLabelsByBoardId(boardId: number): Promise<Label[]> {
     const query = `
-      SELECT id, board_id, name, color, created_at, updated_at
-      FROM labels 
-      WHERE board_id = $1 
+      SELECT id, board_id, name, color, text_color, created_at, updated_at
+      FROM labels
+      WHERE board_id = $1
       ORDER BY created_at ASC
     `;
     const result = await pool.query(query, [boardId]);
@@ -33,10 +33,27 @@ class LabelService {
   }
 
   /**
+   * Calcula el color de texto óptimo basado en el color de fondo
+   */
+  private static calculateTextColor(backgroundColor: string): string {
+    // Convertir hex a RGB
+    const hex = backgroundColor.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+
+    // Calcular luminosidad (fórmula estándar)
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+    // Si el fondo es claro → texto oscuro, si es oscuro → texto claro
+    return luminance > 0.5 ? '#000000' : '#FFFFFF';
+  }
+
+  /**
    * Crea una nueva etiqueta en un tablero
    */
   static async createLabel(data: CreateLabelPayload): Promise<Label> {
-    const { board_id, name, color } = data;
+    const { board_id, name, color, text_color } = data;
 
     const client = await pool.connect();
     try {
@@ -48,14 +65,19 @@ class LabelService {
         throw new Error('El tablero especificado no existe.');
       }
 
+      // Calcular color de texto si no se proporciona o es 'auto'
+      const finalTextColor = (!text_color || text_color === 'auto')
+        ? this.calculateTextColor(color)
+        : text_color;
+
       // Crear la etiqueta
       const query = `
-        INSERT INTO labels (board_id, name, color) 
-        VALUES ($1, $2, $3) 
+        INSERT INTO labels (board_id, name, color, text_color)
+        VALUES ($1, $2, $3, $4)
         RETURNING *
       `;
-      const result = await client.query(query, [board_id, name, color]);
-      
+      const result = await client.query(query, [board_id, name, color, finalTextColor]);
+
       await client.query('COMMIT');
       return result.rows[0] as Label;
 
@@ -73,10 +95,26 @@ class LabelService {
    */
   static async updateLabel(id: number, data: UpdateLabelPayload): Promise<Label | null> {
     console.log(`🏷️ [LabelService.updateLabel] Iniciando actualización de etiqueta ${id}`, data);
-    
-    const fieldsToUpdate = Object.keys(data) as Array<keyof UpdateLabelPayload>;
+
+    // Manejar text_color automático
+    const updatedData = { ...data };
+
+    // Si se actualiza el color y text_color es 'auto' o no está definido, calcularlo
+    if (data.color && (!data.text_color || data.text_color === 'auto')) {
+      updatedData.text_color = this.calculateTextColor(data.color);
+      console.log(`🎨 [LabelService.updateLabel] Color de texto calculado automáticamente: ${updatedData.text_color}`);
+    } else if (data.text_color === 'auto') {
+      // Si solo se pide text_color = 'auto', obtener el color actual
+      const currentLabel = await pool.query('SELECT color FROM labels WHERE id = $1', [id]);
+      if (currentLabel.rows[0]) {
+        updatedData.text_color = this.calculateTextColor(currentLabel.rows[0].color);
+        console.log(`🎨 [LabelService.updateLabel] Color de texto recalculado: ${updatedData.text_color}`);
+      }
+    }
+
+    const fieldsToUpdate = Object.keys(updatedData) as Array<keyof UpdateLabelPayload>;
     console.log(`🔍 [LabelService.updateLabel] Campos a actualizar:`, fieldsToUpdate);
-    
+
     if (fieldsToUpdate.length === 0) {
       console.log(`⚠️ [LabelService.updateLabel] No hay campos para actualizar`);
       const currentLabel = await pool.query('SELECT * FROM labels WHERE id = $1', [id]);
@@ -84,19 +122,19 @@ class LabelService {
     }
 
     const setClause = fieldsToUpdate.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
-    const queryValues: any[] = fieldsToUpdate.map(key => data[key]);
+    const queryValues: any[] = fieldsToUpdate.map(key => updatedData[key]);
     queryValues.push(id);
 
     const query = `
-      UPDATE labels 
+      UPDATE labels
       SET ${setClause}, updated_at = NOW()
-      WHERE id = $${queryValues.length} 
+      WHERE id = $${queryValues.length}
       RETURNING *
     `;
-    
+
     console.log(`📝 [LabelService.updateLabel] Query SQL:`, query);
     console.log(`📝 [LabelService.updateLabel] Valores:`, queryValues);
-    
+
     const result = await pool.query(query, queryValues);
     console.log(`✅ [LabelService.updateLabel] Resultado:`, result.rows[0]);
     return result.rows[0] || null;
@@ -191,7 +229,7 @@ class LabelService {
    */
   static async getLabelsForCard(cardId: string): Promise<Label[]> {
     const query = `
-      SELECT l.id, l.board_id, l.name, l.color, l.created_at, l.updated_at
+      SELECT l.id, l.board_id, l.name, l.color, l.text_color, l.created_at, l.updated_at
       FROM labels l
       INNER JOIN card_labels cl ON l.id = cl.label_id
       WHERE cl.card_id = $1
@@ -287,6 +325,12 @@ class LabelController {
       if (data.color && !/^#[0-9A-F]{6}$/i.test(data.color)) {
         console.log(`❌ [LabelController.update] Color inválido: ${data.color}`);
         return c.json({ error: 'color debe ser un valor hexadecimal válido (ej: #FF5733)' }, 400);
+      }
+
+      // Validar text_color si se proporciona (permitir 'auto' o hex válido)
+      if (data.text_color && data.text_color !== 'auto' && !/^#[0-9A-F]{6}$/i.test(data.text_color)) {
+        console.log(`❌ [LabelController.update] Color de texto inválido: ${data.text_color}`);
+        return c.json({ error: 'text_color debe ser "auto" o un valor hexadecimal válido (ej: #FFFFFF)' }, 400);
       }
 
       console.log(`🔄 [LabelController.update] Llamando a LabelService.updateLabel...`);

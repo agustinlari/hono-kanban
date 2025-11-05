@@ -21,6 +21,7 @@ export interface Label {
     board_id: number;
     name: string;
     color: string; // Hex color like '#FF5733'
+    text_color: string; // Hex color for text, defaults to '#FFFFFF' or auto-calculated
     created_at: Date;
     updated_at: Date;
 }
@@ -159,11 +160,13 @@ export interface CreateLabelPayload {
   board_id: number;
   name: string;
   color: string;
+  text_color?: string; // Optional: 'auto' for automatic calculation, or hex color
 }
 
 export interface UpdateLabelPayload {
   name?: string;
   color?: string;
+  text_color?: string; // Optional: 'auto' for automatic calculation, or hex color
 }
 
 export interface CardLabelPayload {

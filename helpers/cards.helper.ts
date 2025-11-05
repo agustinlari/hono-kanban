@@ -1085,7 +1085,7 @@ class CardService {
 
       // Obtener labels únicos de tarjetas en tableros accesibles
       const labelsQuery = `
-        SELECT DISTINCT l.id, l.name, l.color
+        SELECT DISTINCT l.id, l.name, l.color, l.text_color
         FROM labels l
         INNER JOIN card_labels cl ON l.id = cl.label_id
         INNER JOIN cards c ON cl.card_id = c.id
