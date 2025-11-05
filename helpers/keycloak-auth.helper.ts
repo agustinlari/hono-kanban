@@ -167,14 +167,34 @@ class KeycloakAuthService {
         };
       } else {
         // Usuario no existe, crearlo
+        // Generamos colores por defecto basados en un hash del email
+        // Gradientes equilibrados: buen contraste pero suaves
+        const gradients = [
+          "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", // Morado
+          "linear-gradient(135deg, #e94057 0%, #f27121 100%)", // Coral-Naranja
+          "linear-gradient(135deg, #3a7bd5 0%, #00d2ff 100%)", // Azul cielo
+          "linear-gradient(135deg, #0ba360 0%, #3cba92 100%)", // Verde menta
+          "linear-gradient(135deg, #d53369 0%, #daae51 100%)", // Rosa-Dorado
+          "linear-gradient(135deg, #a8c0ff 0%, #3f2b96 100%)", // Lavanda-Púrpura
+          "linear-gradient(135deg, #fa8bff 0%, #2bd2ff 100%)", // Rosa-Cyan
+          "linear-gradient(135deg, #4481eb 0%, #04befe 100%)"  // Azul eléctrico
+        ];
+
+        // Simple hash del email para seleccionar un gradiente consistente
+        const emailHash = keycloakUser.email.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        const gradientIndex = emailHash % gradients.length;
+        const defaultGradient = gradients[gradientIndex];
+
         const insertResult = await client.query(`
-          INSERT INTO usuarios (keycloak_id, email, rol) 
-          VALUES ($1, $2, $3) 
+          INSERT INTO usuarios (keycloak_id, email, rol, color_fondo, color_texto)
+          VALUES ($1, $2, $3, $4, $5)
           RETURNING *
         `, [
           keycloakUser.sub,
           keycloakUser.email,
-          'user' // Rol por defecto
+          'user', // Rol por defecto
+          defaultGradient,
+          '#ffffff' // Color de texto blanco por defecto
         ]);
 
         const newUser = insertResult.rows[0];

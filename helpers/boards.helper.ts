@@ -66,7 +66,9 @@ class BoardService {
         ca.workload_hours,
         ca.assignment_order,
         u.email as user_email,
-        u.email as user_name
+        u.name as user_name,
+        u.color_fondo as user_color_fondo,
+        u.color_texto as user_color_texto
       FROM card_assignments ca
       INNER JOIN usuarios u ON ca.user_id = u.id
       INNER JOIN cards c ON ca.card_id = c.id
@@ -119,6 +121,8 @@ class BoardService {
         card_id: assigneeRow.card_id,
         user_email: assigneeRow.user_email,
         user_name: assigneeRow.user_name,
+        user_color_fondo: assigneeRow.user_color_fondo,
+        user_color_texto: assigneeRow.user_color_texto,
         assigned_by: assigneeRow.assigned_by,
         assigned_at: assigneeRow.assigned_at,
         workload_hours: parseFloat(assigneeRow.workload_hours),
