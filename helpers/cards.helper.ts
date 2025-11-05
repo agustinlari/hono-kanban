@@ -35,19 +35,18 @@ class CardService {
       }
       const listTitle = listCheck.rows[0].title;
 
-      // 2. Calcular la nueva posición de la tarjeta dentro de esa lista.
-      const positionResult = await client.query(
-        'SELECT COUNT(*) as count FROM cards WHERE list_id = $1',
+      // 2. Incrementar la posición de todas las tarjetas existentes en esta lista
+      await client.query(
+        'UPDATE cards SET position = position + 1 WHERE list_id = $1',
         [list_id]
       );
-      const newPosition = parseInt(positionResult.rows[0].count);
 
-      // 3. Insertar la nueva tarjeta.
+      // 3. Insertar la nueva tarjeta en la posición 0 (primera posición)
       const query = `
         INSERT INTO cards (title, list_id, position, proyecto_id)
         VALUES ($1, $2, $3, $4) RETURNING *;
       `;
-      const result = await client.query(query, [title, list_id, newPosition, proyecto_id || null]);
+      const result = await client.query(query, [title, list_id, 0, proyecto_id || null]);
 
       const newCard = result.rows[0];
 
