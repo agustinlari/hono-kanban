@@ -50,6 +50,20 @@ export interface IncompleteTasks {
   tasks: IncompleteTask[];
 }
 
+export interface TaskWithoutProject {
+  card_id: string;
+  card_title: string;
+  card_progress: number;
+  board_id: number;
+  board_name: string;
+  list_id: number;
+  list_title: string;
+}
+
+export interface TasksWithoutProject {
+  tasks: TaskWithoutProject[];
+}
+
 // ================================
 // Lógica de Servicio (RoadmapService)
 // ================================
@@ -172,6 +186,43 @@ class RoadmapService {
       throw error;
     }
   }
+
+  /**
+   * Obtiene todas las tarjetas sin proyecto asignado (progreso < 100)
+   * de tableros accesibles por el usuario
+   */
+  static async getTasksWithoutProject(userId: number): Promise<TasksWithoutProject> {
+    try {
+      const query = `
+        SELECT
+          c.id as card_id,
+          c.title as card_title,
+          c.progress as card_progress,
+          b.id as board_id,
+          b.name as board_name,
+          l.id as list_id,
+          l.title as list_title
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND (c.proyecto_id IS NULL OR c.proyecto_id = 0)
+          AND c.progress < 100
+        ORDER BY b.name, c.title
+      `;
+
+      const result = await pool.query(query, [userId]);
+
+      return {
+        tasks: result.rows
+      };
+    } catch (error) {
+      console.error('Error en RoadmapService.getTasksWithoutProject:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -209,6 +260,22 @@ class RoadmapController {
       return c.json({ error: 'No se pudieron obtener las tareas incompletas' }, 500);
     }
   }
+
+  static async getTasksWithoutProject(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const data = await RoadmapService.getTasksWithoutProject(user.userId);
+      return c.json(data, 200);
+
+    } catch (error: any) {
+      console.error('Error en RoadmapController.getTasksWithoutProject:', error);
+      return c.json({ error: 'No se pudieron obtener las tareas sin proyecto' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -219,5 +286,6 @@ export const roadmapRoutes = new Hono<{ Variables: Variables }>();
 roadmapRoutes.use('*', keycloakAuthMiddleware);
 roadmapRoutes.get('/roadmap', RoadmapController.getData);
 roadmapRoutes.get('/roadmap/incomplete-tasks', RoadmapController.getIncompleteTasks);
+roadmapRoutes.get('/roadmap/tasks-without-project', RoadmapController.getTasksWithoutProject);
 
 export { RoadmapController };
