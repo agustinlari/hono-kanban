@@ -707,9 +707,9 @@ class CardService {
     try {
       await client.query('BEGIN');
 
-      // 1. Obtener la list_id de la tarjeta que vamos a borrar.
+      // 1. Obtener la list_id y peticion_id de la tarjeta que vamos a borrar.
       const cardMetaResult = await client.query(
-        'SELECT list_id FROM cards WHERE id = $1',
+        'SELECT list_id, peticion_id FROM cards WHERE id = $1',
         [id]
       );
 
@@ -717,7 +717,7 @@ class CardService {
         await client.query('ROLLBACK');
         return false; // La tarjeta no existe
       }
-      const { list_id } = cardMetaResult.rows[0];
+      const { list_id, peticion_id } = cardMetaResult.rows[0];
 
       // 2. Obtener board_id antes de borrar la tarjeta
       const boardIdQuery = await client.query(
@@ -728,6 +728,12 @@ class CardService {
 
       // 2.5. Borrar todos los archivos asociados a la tarjeta (antes de borrar la tarjeta)
       await ArchivoService.borrarArchivosDeCard(id);
+
+      // 2.6. Borrar la petición asociada si existe
+      if (peticion_id) {
+        console.log(`🗑️ [CardService.deleteCard] Borrando petición asociada: ${peticion_id}`);
+        await client.query('DELETE FROM peticiones WHERE id = $1', [peticion_id]);
+      }
 
       // 3. Borrar la tarjeta.
       await client.query('DELETE FROM cards WHERE id = $1', [id]);
