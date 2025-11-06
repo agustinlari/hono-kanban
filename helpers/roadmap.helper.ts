@@ -125,24 +125,11 @@ class RoadmapService {
 
   /**
    * Obtiene todas las tarjetas incompletas (sin fechas o sin usuarios asignados)
-   * de proyectos que tienen tareas en el roadmap
+   * de TODOS los proyectos accesibles por el usuario
    */
   static async getIncompleteTasks(userId: number): Promise<IncompleteTasks> {
     try {
       const query = `
-        WITH roadmap_projects AS (
-          -- Proyectos que ya tienen tareas en el roadmap
-          SELECT DISTINCT c.proyecto_id
-          FROM cards c
-          INNER JOIN lists l ON c.list_id = l.id
-          INNER JOIN boards b ON l.board_id = b.id
-          INNER JOIN board_members bm ON b.id = bm.board_id
-          WHERE bm.user_id = $1
-            AND bm.can_view = true
-            AND c.start_date IS NOT NULL
-            AND c.due_date IS NOT NULL
-            AND c.proyecto_id IS NOT NULL
-        )
         SELECT
           c.id as card_id,
           c.title as card_title,
@@ -159,7 +146,6 @@ class RoadmapService {
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
         INNER JOIN board_members bm ON b.id = bm.board_id
-        INNER JOIN roadmap_projects rp ON c.proyecto_id = rp.proyecto_id
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
         LEFT JOIN card_assignments ca ON c.id = ca.card_id
         WHERE bm.user_id = $1
