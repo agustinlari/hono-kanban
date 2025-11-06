@@ -209,7 +209,7 @@ class RoadmapService {
         WHERE bm.user_id = $1
           AND bm.can_view = true
           AND (c.proyecto_id IS NULL OR c.proyecto_id = 0)
-          AND c.progress < 100
+          AND (c.progress < 100 OR c.progress IS NULL)
         ORDER BY b.name, c.title
       `;
 
