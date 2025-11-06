@@ -32,6 +32,24 @@ export interface RoadmapData {
   tasks: RoadmapTask[];
 }
 
+export interface IncompleteTask {
+  card_id: string;
+  card_title: string;
+  board_id: number;
+  board_name: string;
+  list_id: number;
+  list_title: string;
+  proyecto_id: number;
+  proyecto_codigo: number;
+  missing_start_date: boolean;
+  missing_due_date: boolean;
+  missing_assignees: boolean;
+}
+
+export interface IncompleteTasks {
+  tasks: IncompleteTask[];
+}
+
 // ================================
 // Lógica de Servicio (RoadmapService)
 // ================================
@@ -90,6 +108,70 @@ class RoadmapService {
       throw error;
     }
   }
+
+  /**
+   * Obtiene todas las tarjetas incompletas (sin fechas o sin usuarios asignados)
+   * de proyectos que tienen tareas en el roadmap
+   */
+  static async getIncompleteTasks(userId: number): Promise<IncompleteTasks> {
+    try {
+      const query = `
+        WITH roadmap_projects AS (
+          -- Proyectos que ya tienen tareas en el roadmap
+          SELECT DISTINCT c.proyecto_id
+          FROM cards c
+          INNER JOIN lists l ON c.list_id = l.id
+          INNER JOIN boards b ON l.board_id = b.id
+          INNER JOIN board_members bm ON b.id = bm.board_id
+          WHERE bm.user_id = $1
+            AND bm.can_view = true
+            AND c.start_date IS NOT NULL
+            AND c.due_date IS NOT NULL
+            AND c.proyecto_id IS NOT NULL
+        )
+        SELECT
+          c.id as card_id,
+          c.title as card_title,
+          b.id as board_id,
+          b.name as board_name,
+          l.id as list_id,
+          l.title as list_title,
+          c.proyecto_id,
+          p.codigo as proyecto_codigo,
+          (c.start_date IS NULL) as missing_start_date,
+          (c.due_date IS NULL) as missing_due_date,
+          (COUNT(ca.user_id) = 0) as missing_assignees
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        INNER JOIN board_members bm ON b.id = bm.board_id
+        INNER JOIN roadmap_projects rp ON c.proyecto_id = rp.proyecto_id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN card_assignments ca ON c.id = ca.card_id
+        WHERE bm.user_id = $1
+          AND bm.can_view = true
+          AND c.proyecto_id IS NOT NULL
+          AND (
+            c.start_date IS NULL
+            OR c.due_date IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM card_assignments ca2 WHERE ca2.card_id = c.id
+            )
+          )
+        GROUP BY c.id, b.id, l.id, p.id, c.start_date, c.due_date
+        ORDER BY b.name, c.title
+      `;
+
+      const result = await pool.query(query, [userId]);
+
+      return {
+        tasks: result.rows
+      };
+    } catch (error) {
+      console.error('Error en RoadmapService.getIncompleteTasks:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -111,6 +193,22 @@ class RoadmapController {
       return c.json({ error: 'No se pudieron obtener los datos del roadmap' }, 500);
     }
   }
+
+  static async getIncompleteTasks(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+
+      const data = await RoadmapService.getIncompleteTasks(user.userId);
+      return c.json(data, 200);
+
+    } catch (error: any) {
+      console.error('Error en RoadmapController.getIncompleteTasks:', error);
+      return c.json({ error: 'No se pudieron obtener las tareas incompletas' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -120,5 +218,6 @@ export const roadmapRoutes = new Hono<{ Variables: Variables }>();
 
 roadmapRoutes.use('*', keycloakAuthMiddleware);
 roadmapRoutes.get('/roadmap', RoadmapController.getData);
+roadmapRoutes.get('/roadmap/incomplete-tasks', RoadmapController.getIncompleteTasks);
 
 export { RoadmapController };
