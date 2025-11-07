@@ -1208,6 +1208,7 @@ class CardService {
           l.title as list_title,
           l.board_id,
           b.name as board_name,
+          b.badge_settings,
           p.nombre_proyecto,
           p.codigo as proyecto_codigo,
           p.cadena as proyecto_cadena,
@@ -1216,11 +1217,11 @@ class CardService {
             jsonb_agg(
               DISTINCT jsonb_build_object(
                 'id', u.id,
-                'name', u.name
+                'user_name', u.name
               )
             ) FILTER (WHERE u.id IS NOT NULL),
             '[]'::jsonb
-          ) as assigned_users,
+          ) as assignees,
           COALESCE(
             jsonb_agg(
               DISTINCT jsonb_build_object(
@@ -1345,7 +1346,7 @@ class CardService {
       }
 
       query += `
-        GROUP BY c.id, l.title, l.board_id, b.name, p.nombre_proyecto, p.codigo, p.cadena, p.inmueble
+        GROUP BY c.id, l.title, l.board_id, b.name, b.badge_settings, p.nombre_proyecto, p.codigo, p.cadena, p.inmueble
         ORDER BY c.id DESC
         LIMIT 100
       `;
