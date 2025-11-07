@@ -391,6 +391,60 @@ class BoardService {
       throw error;
     }
   }
+
+  /**
+   * Actualiza la configuración de badges de un tablero
+   */
+  static async updateBadgeSettings(boardId: number, badgeSettings: any): Promise<any> {
+    try {
+      // Validar estructura básica
+      if (!badgeSettings || typeof badgeSettings !== 'object') {
+        throw new Error('badge_settings debe ser un objeto válido');
+      }
+
+      if (!badgeSettings.footer || typeof badgeSettings.footer !== 'object') {
+        throw new Error('badge_settings.footer debe ser un objeto válido');
+      }
+
+      if (!Array.isArray(badgeSettings.project_fields)) {
+        throw new Error('badge_settings.project_fields debe ser un array');
+      }
+
+      // Validar que los campos del footer son booleanos
+      const footerKeys = ['dates', 'progress', 'workload'];
+      for (const key of footerKeys) {
+        if (typeof badgeSettings.footer[key] !== 'boolean') {
+          throw new Error(`badge_settings.footer.${key} debe ser un booleano`);
+        }
+      }
+
+      // Validar que los project_fields son strings no vacíos
+      for (const field of badgeSettings.project_fields) {
+        if (typeof field !== 'string' || field.trim() === '') {
+          throw new Error('Todos los project_fields deben ser strings no vacíos');
+        }
+      }
+
+      // Actualizar en la base de datos
+      const query = `
+        UPDATE boards
+        SET badge_settings = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING badge_settings
+      `;
+
+      const result = await pool.query(query, [JSON.stringify(badgeSettings), boardId]);
+
+      if (!result.rowCount || result.rowCount === 0) {
+        throw new Error('Tablero no encontrado');
+      }
+
+      return result.rows[0].badge_settings;
+    } catch (error) {
+      console.error('Error en BoardService.updateBadgeSettings:', error);
+      throw error;
+    }
+  }
 }
 
 // ================================
@@ -507,6 +561,42 @@ class BoardController {
       return c.json({ error: 'No se pudieron obtener los usuarios del board' }, 500);
     }
   }
+
+  /**
+   * Actualiza la configuración de badges de un tablero
+   */
+  static async updateBadgeSettings(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const boardId = parseInt(c.req.param('id'));
+      if (isNaN(boardId)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      // Verificar que el usuario tiene permiso de edición del tablero
+      const permissionQuery = `
+        SELECT can_edit_board
+        FROM board_members
+        WHERE board_id = $1 AND user_id = $2
+      `;
+      const permissionResult = await pool.query(permissionQuery, [boardId, user.userId]);
+
+      if (!permissionResult.rowCount || !permissionResult.rows[0].can_edit_board) {
+        return c.json({ error: 'No tienes permiso para editar la configuración de este tablero' }, 403);
+      }
+
+      const badgeSettings = await c.req.json();
+      const updatedSettings = await BoardService.updateBadgeSettings(boardId, badgeSettings);
+
+      return c.json({ badge_settings: updatedSettings }, 200);
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.updateBadgeSettings para board ${c.req.param('id')}:`, error);
+      return c.json({ error: error.message || 'No se pudo actualizar la configuración de badges' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -522,5 +612,6 @@ boardRoutes.post('/boards', BoardController.create);
 boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
 boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);
 boardRoutes.get('/boards/:id/users', requireBoardAccess(), BoardController.getBoardUsers);
+boardRoutes.put('/boards/:id/badge-settings', requireBoardAccess(), BoardController.updateBadgeSettings);
 
 export { BoardController };
