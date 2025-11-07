@@ -1209,10 +1209,30 @@ class CardService {
           l.board_id,
           b.name as board_name,
           b.badge_settings,
-          p.nombre_proyecto,
-          p.codigo as proyecto_codigo,
-          p.cadena as proyecto_cadena,
-          p.inmueble as proyecto_inmueble,
+          CASE
+            WHEN p.id IS NOT NULL THEN
+              jsonb_build_object(
+                'id', p.id,
+                'nombre_proyecto', p.nombre_proyecto,
+                'codigo', p.codigo,
+                'cod_integracion', p.cod_integracion,
+                'mercado', p.mercado,
+                'cadena', p.cadena,
+                'inmueble', p.inmueble,
+                'sup_alq', p.sup_alq,
+                'ciudad', p.ciudad,
+                'descripcion', p.descripcion,
+                'bt_solicitud', p.bt_solicitud,
+                'inicio_obra_prevista', p.inicio_obra_prevista,
+                'inicio_obra_real', p.inicio_obra_real,
+                'apert_espacio_prevista', p.apert_espacio_prevista,
+                'presupuesto', p.presupuesto,
+                'es_bim', p.es_bim,
+                'numero_obra_osmos', p.numero_obra_osmos,
+                'activo', p.activo
+              )
+            ELSE NULL
+          END as proyecto,
           COALESCE(
             jsonb_agg(
               DISTINCT jsonb_build_object(
@@ -1346,7 +1366,7 @@ class CardService {
       }
 
       query += `
-        GROUP BY c.id, l.title, l.board_id, b.name, b.badge_settings, p.nombre_proyecto, p.codigo, p.cadena, p.inmueble
+        GROUP BY c.id, l.title, l.board_id, b.name, b.badge_settings, p.id, p.nombre_proyecto, p.codigo, p.cod_integracion, p.mercado, p.cadena, p.inmueble, p.sup_alq, p.ciudad, p.descripcion, p.bt_solicitud, p.inicio_obra_prevista, p.inicio_obra_real, p.apert_espacio_prevista, p.presupuesto, p.es_bim, p.numero_obra_osmos, p.activo
         ORDER BY c.id DESC
         LIMIT 100
       `;
