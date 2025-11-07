@@ -356,6 +356,39 @@ class CardService {
             throw new Error('Uno o más usuarios especificados no existen');
           }
 
+          // Obtener el board_id de la tarjeta
+          const boardIdQuery = await client.query(
+            `SELECT l.board_id
+             FROM cards c
+             JOIN lists l ON c.list_id = l.id
+             WHERE c.id = $1`,
+            [id]
+          );
+          const boardId = boardIdQuery.rows[0].board_id;
+
+          // Para cada usuario asignado, verificar si está en board_members
+          // Si no está, añadirlo con permisos básicos (solo can_view)
+          for (const assigneeUserId of userIds) {
+            const memberCheck = await client.query(
+              'SELECT id FROM board_members WHERE board_id = $1 AND user_id = $2',
+              [boardId, assigneeUserId]
+            );
+
+            if (memberCheck.rowCount === 0) {
+              // Usuario no es miembro del tablero, añadirlo con permisos básicos
+              await client.query(
+                `INSERT INTO board_members (
+                  board_id, user_id, invited_by,
+                  can_view, can_create_cards, can_edit_cards, can_move_cards,
+                  can_delete_cards, can_manage_labels, can_add_members,
+                  can_remove_members, can_edit_board, can_delete_board
+                ) VALUES ($1, $2, $3, true, false, false, false, false, false, false, false, false, false)`,
+                [boardId, assigneeUserId, userId]
+              );
+              console.log(`✅ [CardService.updateCard] Usuario ${assigneeUserId} añadido a board_members con permisos básicos`);
+            }
+          }
+
           // Insertar nuevas asignaciones y crear actividades/notificaciones para nuevos asignados
           for (const assigneeData of assignees) {
             await client.query(
