@@ -301,6 +301,7 @@ export interface Notification {
   activity?: CardActivity;
   card_id?: string;
   card_title?: string;
+  card_display_name?: string; // Nombre para mostrar: título o info del proyecto si no hay título
   board_id?: number;
   board_name?: string;
   list_title?: string;

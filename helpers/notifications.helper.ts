@@ -111,13 +111,29 @@ export class NotificationService {
           l.board_id,
           b.name as board_name,
           u.email as actor_email,
-          COALESCE(u.name, u.email) as actor_name
+          COALESCE(u.name, u.email) as actor_name,
+          p.codigo as proyecto_codigo,
+          p.inmueble as proyecto_inmueble,
+          p.cadena as proyecto_cadena,
+          p.ciudad as proyecto_ciudad,
+          CASE
+            WHEN c.title IS NOT NULL AND c.title != '' THEN c.title
+            WHEN p.codigo IS NOT NULL THEN
+              CONCAT('[',
+                COALESCE(p.codigo::text, ''),
+                CASE WHEN p.inmueble IS NOT NULL THEN CONCAT(' - ', p.inmueble) ELSE '' END,
+                CASE WHEN p.cadena IS NOT NULL THEN CONCAT(' - ', p.cadena) ELSE '' END,
+                ']'
+              )
+            ELSE 'Tarjeta sin título'
+          END as card_display_name
         FROM notifications n
         JOIN card_activity ca ON n.activity_id = ca.id
         JOIN cards c ON ca.card_id = c.id
         JOIN lists l ON c.list_id = l.id
         JOIN boards b ON l.board_id = b.id
         LEFT JOIN usuarios u ON ca.user_id = u.id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
         WHERE n.id = $1
       `;
       const notificationInfoResult = await client.query(notificationQuery, [notificationId]);
@@ -132,6 +148,7 @@ export class NotificationService {
           created_at: notif.created_at,
           card_id: notif.card_id,
           card_title: notif.card_title,
+          card_display_name: notif.card_display_name,
           board_id: notif.board_id,
           board_name: notif.board_name,
           list_title: notif.list_title,
@@ -290,13 +307,29 @@ export class NotificationService {
           l.board_id,
           b.name as board_name,
           u.email as actor_email,
-          COALESCE(u.name, u.email) as actor_name
+          COALESCE(u.name, u.email) as actor_name,
+          p.codigo as proyecto_codigo,
+          p.inmueble as proyecto_inmueble,
+          p.cadena as proyecto_cadena,
+          p.ciudad as proyecto_ciudad,
+          CASE
+            WHEN c.title IS NOT NULL AND c.title != '' THEN c.title
+            WHEN p.codigo IS NOT NULL THEN
+              CONCAT('[',
+                COALESCE(p.codigo::text, ''),
+                CASE WHEN p.inmueble IS NOT NULL THEN CONCAT(' - ', p.inmueble) ELSE '' END,
+                CASE WHEN p.cadena IS NOT NULL THEN CONCAT(' - ', p.cadena) ELSE '' END,
+                ']'
+              )
+            ELSE 'Tarjeta sin título'
+          END as card_display_name
         FROM notifications n
         JOIN card_activity ca ON n.activity_id = ca.id
         JOIN cards c ON ca.card_id = c.id
         JOIN lists l ON c.list_id = l.id
         JOIN boards b ON l.board_id = b.id
         LEFT JOIN usuarios u ON ca.user_id = u.id
+        LEFT JOIN proyectos p ON c.proyecto_id = p.id
         WHERE ${whereClause}
         ORDER BY n.created_at DESC
         LIMIT $2
@@ -321,6 +354,7 @@ export class NotificationService {
         created_at: row.created_at,
         card_id: row.card_id,
         card_title: row.card_title,
+        card_display_name: row.card_display_name,
         board_id: row.board_id,
         board_name: row.board_name,
         list_title: row.list_title,
