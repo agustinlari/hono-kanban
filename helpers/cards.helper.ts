@@ -1186,11 +1186,12 @@ class CardService {
       filterNoDates?: boolean;
       filterNoProject?: boolean;
       filterNoUser?: boolean;
+      customFieldFilters?: Array<{ fieldId: number; value: string; dataType: string }>;
     }
   ): Promise<any[]> {
     const client = await pool.connect();
     try {
-      const { searchTerm, projectIds, boardIds, userIds, labelIds, hideCompleted, startDateFrom, startDateTo, dueDateFrom, dueDateTo, filterNoDates, filterNoProject, filterNoUser } = filters;
+      const { searchTerm, projectIds, boardIds, userIds, labelIds, hideCompleted, startDateFrom, startDateTo, dueDateFrom, dueDateTo, filterNoDates, filterNoProject, filterNoUser, customFieldFilters } = filters;
 
       // Query base que incluye joins con proyectos, usuarios asignados y tableros
       let query = `
@@ -1363,6 +1364,59 @@ class CardService {
           SELECT 1 FROM card_assignments ca3
           WHERE ca3.card_id = c.id
         )`;
+      }
+
+      // Filtro por campos personalizados
+      if (customFieldFilters && customFieldFilters.length > 0) {
+        for (const filter of customFieldFilters) {
+          const { fieldId, value, dataType } = filter;
+
+          if (dataType === 'text' || dataType === 'select') {
+            // Búsqueda parcial para texto y select
+            query += ` AND EXISTS (
+              SELECT 1 FROM card_custom_field_values cfv
+              WHERE cfv.card_id = c.id
+              AND cfv.field_id = $${paramIndex}
+              AND cfv.text_value ILIKE $${paramIndex + 1}
+            )`;
+            params.push(fieldId);
+            params.push(`%${value}%`);
+            paramIndex += 2;
+          } else if (dataType === 'number') {
+            // Búsqueda exacta para números
+            query += ` AND EXISTS (
+              SELECT 1 FROM card_custom_field_values cfv
+              WHERE cfv.card_id = c.id
+              AND cfv.field_id = $${paramIndex}
+              AND cfv.numeric_value = $${paramIndex + 1}
+            )`;
+            params.push(fieldId);
+            params.push(parseFloat(value));
+            paramIndex += 2;
+          } else if (dataType === 'boolean') {
+            // Búsqueda exacta para booleanos
+            query += ` AND EXISTS (
+              SELECT 1 FROM card_custom_field_values cfv
+              WHERE cfv.card_id = c.id
+              AND cfv.field_id = $${paramIndex}
+              AND cfv.bool_value = $${paramIndex + 1}
+            )`;
+            params.push(fieldId);
+            params.push(value === 'true');
+            paramIndex += 2;
+          } else if (dataType === 'date') {
+            // Búsqueda por fecha (mismo día)
+            query += ` AND EXISTS (
+              SELECT 1 FROM card_custom_field_values cfv
+              WHERE cfv.card_id = c.id
+              AND cfv.field_id = $${paramIndex}
+              AND cfv.date_value::date = $${paramIndex + 1}::date
+            )`;
+            params.push(fieldId);
+            params.push(value);
+            paramIndex += 2;
+          }
+        }
       }
 
       query += `
@@ -1637,12 +1691,23 @@ class CardController {
       const filterNoDates = c.req.query('filterNoDates') === 'true';
       const filterNoProject = c.req.query('filterNoProject') === 'true';
       const filterNoUser = c.req.query('filterNoUser') === 'true';
+      const customFieldFiltersParam = c.req.query('customFieldFilters');
 
       // Parsear arrays de IDs
       const projectIds = projectIdsParam ? projectIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
       const boardIds = boardIdsParam ? boardIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
       const userIds = userIdsParam ? userIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
       const labelIds = labelIdsParam ? labelIdsParam.split(',').map(Number).filter(n => !isNaN(n)) : undefined;
+
+      // Parsear filtros de campos personalizados (formato JSON)
+      let customFieldFilters: Array<{ fieldId: number; value: string; dataType: string }> | undefined;
+      if (customFieldFiltersParam) {
+        try {
+          customFieldFilters = JSON.parse(customFieldFiltersParam);
+        } catch (e) {
+          console.warn('⚠️ [CardController.search] Error parseando customFieldFilters:', e);
+        }
+      }
 
       console.log('🔍 [CardController.search] Filtros recibidos:', {
         searchTerm,
@@ -1657,7 +1722,8 @@ class CardController {
         dueDateTo,
         filterNoDates,
         filterNoProject,
-        filterNoUser
+        filterNoUser,
+        customFieldFilters
       });
 
       const cards = await CardService.searchCards(user.userId, {
@@ -1673,7 +1739,8 @@ class CardController {
         dueDateTo,
         filterNoDates,
         filterNoProject,
-        filterNoUser
+        filterNoUser,
+        customFieldFilters
       });
 
       return c.json(cards, 200);
