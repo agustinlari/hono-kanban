@@ -322,3 +322,68 @@ export interface NotificationsResponse {
 export interface MarkNotificationReadPayload {
   notification_id: number;
 }
+
+// ===================================================================
+// TIPOS PARA EL SISTEMA DE CAMPOS PERSONALIZADOS
+// ===================================================================
+
+/**
+ * Tipo de dato de un campo personalizado
+ */
+export type CustomFieldDataType = 'text' | 'number' | 'boolean' | 'date' | 'select';
+
+/**
+ * Interfaz para una definición de campo personalizado
+ */
+export interface CustomFieldDefinition {
+  id: number;
+  name: string;
+  description: string | null;
+  data_type: CustomFieldDataType;
+  options: string[] | null; // Para tipo 'select'
+  created_by: number | null;
+  created_at: Date | null;
+}
+
+/**
+ * Interfaz para un valor de campo personalizado en una tarjeta
+ */
+export interface CardCustomFieldValue {
+  id: number;
+  card_id: string;
+  field_id: number;
+  text_value: string | null;
+  numeric_value: number | null;
+  bool_value: boolean | null;
+  date_value: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * Payload para crear una definición de campo personalizado
+ */
+export interface CreateCustomFieldPayload {
+  name: string;
+  description?: string;
+  data_type: CustomFieldDataType;
+  options?: string[]; // Requerido para tipo 'select'
+}
+
+/**
+ * Payload para actualizar una definición de campo personalizado
+ */
+export interface UpdateCustomFieldPayload {
+  name?: string;
+  description?: string;
+  data_type?: CustomFieldDataType;
+  options?: string[];
+}
+
+/**
+ * Payload para asignar un valor de campo a una tarjeta
+ */
+export interface SetCustomFieldValuePayload {
+  field_id: number;
+  value: string | number | boolean | Date | null;
+}
