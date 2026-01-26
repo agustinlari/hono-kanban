@@ -109,6 +109,26 @@ class BoardService {
     `;
     const checklistsResult = await pool.query(checklistsQuery, [id]);
 
+    // 6. Obtener todos los custom field values de las tarjetas del tablero
+    const customFieldsQuery = `
+      SELECT
+        cfv.card_id,
+        cfv.field_id,
+        cfv.text_value,
+        cfv.numeric_value,
+        cfv.bool_value,
+        cfv.date_value,
+        cfd.name as field_name,
+        cfd.data_type as field_data_type
+      FROM card_custom_field_values cfv
+      INNER JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
+      INNER JOIN cards c ON cfv.card_id = c.id
+      INNER JOIN lists l ON c.list_id = l.id
+      WHERE l.board_id = $1
+      ORDER BY cfd.name ASC
+    `;
+    const customFieldsResult = await pool.query(customFieldsQuery, [id]);
+
     // 4. Crear un mapa de usuarios asignados por tarjeta
     const cardAssigneesMap = new Map<string, any[]>();
     for (const assigneeRow of assigneesResult.rows) {
@@ -156,6 +176,23 @@ class BoardService {
       });
     }
 
+    // 7. Crear un mapa de custom field values por tarjeta
+    const cardCustomFieldsMap = new Map<string, any[]>();
+    for (const cfRow of customFieldsResult.rows) {
+      if (!cardCustomFieldsMap.has(cfRow.card_id)) {
+        cardCustomFieldsMap.set(cfRow.card_id, []);
+      }
+      cardCustomFieldsMap.get(cfRow.card_id)!.push({
+        field_id: cfRow.field_id,
+        field_name: cfRow.field_name,
+        data_type: cfRow.field_data_type,
+        text_value: cfRow.text_value,
+        numeric_value: cfRow.numeric_value !== null ? parseFloat(cfRow.numeric_value) : null,
+        bool_value: cfRow.bool_value,
+        date_value: cfRow.date_value
+      });
+    }
+
     // 5. Procesar los resultados para anidar los datos correctamente
     const listsMap = new Map<number, List>();
     for (const row of listsAndCardsResult.rows) {
@@ -196,7 +233,8 @@ class BoardService {
           labels: cardLabelsMap.get(row.card_id) || [],
           assignees: cardAssigneesMap.get(row.card_id) || [],
           checklist_items_total: checklistStats.total_items,
-          checklist_items_completed: checklistStats.completed_items
+          checklist_items_completed: checklistStats.completed_items,
+          custom_field_values: cardCustomFieldsMap.get(row.card_id) || []
         };
 
         // Agregar información del proyecto si existe
@@ -425,6 +463,18 @@ class BoardService {
         }
       }
 
+      // Validar custom_fields si existe (opcional)
+      if (badgeSettings.custom_fields !== undefined) {
+        if (!Array.isArray(badgeSettings.custom_fields)) {
+          throw new Error('badge_settings.custom_fields debe ser un array');
+        }
+        for (const fieldId of badgeSettings.custom_fields) {
+          if (typeof fieldId !== 'number' || !Number.isInteger(fieldId)) {
+            throw new Error('Todos los custom_fields deben ser números enteros (IDs)');
+          }
+        }
+      }
+
       // Actualizar en la base de datos
       const query = `
         UPDATE boards
@@ -442,6 +492,31 @@ class BoardService {
       return result.rows[0].badge_settings;
     } catch (error) {
       console.error('Error en BoardService.updateBadgeSettings:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtiene los custom fields que tienen al menos un valor en las tarjetas del tablero
+   */
+  static async getBoardCustomFields(boardId: number): Promise<any[]> {
+    try {
+      const query = `
+        SELECT DISTINCT
+          cfd.id,
+          cfd.name,
+          cfd.data_type
+        FROM custom_field_definitions cfd
+        INNER JOIN card_custom_field_values cfv ON cfd.id = cfv.field_id
+        INNER JOIN cards c ON cfv.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        WHERE l.board_id = $1
+        ORDER BY cfd.name ASC
+      `;
+      const result = await pool.query(query, [boardId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error en BoardService.getBoardCustomFields:', error);
       throw error;
     }
   }
@@ -597,6 +672,28 @@ class BoardController {
       return c.json({ error: error.message || 'No se pudo actualizar la configuración de badges' }, 500);
     }
   }
+
+  /**
+   * Obtiene los custom fields que tienen valores en las tarjetas del tablero
+   */
+  static async getBoardCustomFields(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const boardId = parseInt(c.req.param('id'));
+      if (isNaN(boardId)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      const customFields = await BoardService.getBoardCustomFields(boardId);
+      return c.json({ custom_fields: customFields });
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.getBoardCustomFields para board ${c.req.param('id')}:`, error);
+      return c.json({ error: 'No se pudieron obtener los campos personalizados del board' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -613,5 +710,6 @@ boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
 boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);
 boardRoutes.get('/boards/:id/users', requireBoardAccess(), BoardController.getBoardUsers);
 boardRoutes.put('/boards/:id/badge-settings', requireBoardAccess(), BoardController.updateBadgeSettings);
+boardRoutes.get('/boards/:id/custom-fields', requireBoardAccess(), BoardController.getBoardCustomFields);
 
 export { BoardController };
