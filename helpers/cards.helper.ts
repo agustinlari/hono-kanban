@@ -117,6 +117,38 @@ class CardService {
         `creó esta tarjeta en "${listTitle}"`
       );
 
+      // 5. Crear custom fields por defecto del tablero (si están configurados)
+      const boardSettingsQuery = await client.query(
+        `SELECT b.badge_settings
+         FROM boards b
+         INNER JOIN lists l ON l.board_id = b.id
+         WHERE l.id = $1`,
+        [list_id]
+      );
+
+      if (boardSettingsQuery.rowCount && boardSettingsQuery.rowCount > 0) {
+        const badgeSettings = boardSettingsQuery.rows[0].badge_settings;
+        const defaultCustomFields = badgeSettings?.default_custom_fields || [];
+
+        if (defaultCustomFields.length > 0) {
+          console.log(`📋 [CardService] Creando ${defaultCustomFields.length} campos por defecto para tarjeta ${newCard.id}`);
+
+          for (const fieldId of defaultCustomFields) {
+            try {
+              await client.query(
+                `INSERT INTO card_custom_field_values (card_id, field_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (card_id, field_id) DO NOTHING`,
+                [newCard.id, fieldId]
+              );
+            } catch (fieldError) {
+              console.warn(`⚠️ [CardService] Error creando campo por defecto ${fieldId}:`, fieldError);
+              // No fallar la operación si un campo falla
+            }
+          }
+        }
+      }
+
       await client.query('COMMIT');
 
       // Obtener board_id para emitir evento SSE
