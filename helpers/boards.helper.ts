@@ -475,6 +475,13 @@ class BoardService {
         }
       }
 
+      // Validar hide_workload_hours si existe (opcional)
+      if (badgeSettings.hide_workload_hours !== undefined) {
+        if (typeof badgeSettings.hide_workload_hours !== 'boolean') {
+          throw new Error('badge_settings.hide_workload_hours debe ser un booleano');
+        }
+      }
+
       // Actualizar en la base de datos
       const query = `
         UPDATE boards
