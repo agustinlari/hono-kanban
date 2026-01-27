@@ -91,10 +91,40 @@ class ListService {
 
   return result.rowCount > 0;
 }
-  // Aquí podrías añadir en el futuro:
-  // static async updateListTitle(id: number, newTitle: string): Promise<List | null> { ... }
-  // static async deleteList(id: number): Promise<void> { ... }
-  // static async updateListPositions(boardId: number, orderedListIds: number[]): Promise<void> { ... }
+  /**
+   * Reordena las tarjetas de una lista según el array de IDs proporcionado.
+   * Actualiza las posiciones de todas las tarjetas en una sola transacción.
+   */
+  static async sortCards(listId: number, cardIds: string[]): Promise<boolean> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar que la lista existe
+      const listCheck = await client.query('SELECT id FROM lists WHERE id = $1', [listId]);
+      if (listCheck.rowCount === 0) {
+        throw new Error('La lista especificada no existe.');
+      }
+
+      // Actualizar la posición de cada tarjeta según su índice en el array
+      for (let i = 0; i < cardIds.length; i++) {
+        await client.query(
+          'UPDATE cards SET position = $1 WHERE id = $2 AND list_id = $3',
+          [i, cardIds[i], listId]
+        );
+      }
+
+      await client.query('COMMIT');
+      return true;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error en ListService.sortCards:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 // ================================
@@ -162,12 +192,36 @@ class ListController {
       }
 
       // Devolvemos una respuesta vacía con éxito, es una práctica común para DELETE.
-      return c.body(null, 204); 
+      return c.body(null, 204);
       // Alternativa: return c.json({ mensaje: 'Lista eliminada con éxito' }, 200);
 
     } catch (error: any) {
       console.error(`Error en ListController.delete para el id ${c.req.param('id')}:`, error);
       return c.json({ error: 'No se pudo eliminar la lista' }, 500);
+    }
+  }
+
+  static async sortCards(c: Context) {
+    try {
+      const listId = parseInt(c.req.param('id'));
+      if (isNaN(listId)) {
+        return c.json({ error: 'ID de lista inválido' }, 400);
+      }
+
+      const { cardIds } = await c.req.json<{ cardIds: string[] }>();
+      if (!cardIds || !Array.isArray(cardIds)) {
+        return c.json({ error: 'El campo "cardIds" es requerido y debe ser un array' }, 400);
+      }
+
+      await ListService.sortCards(listId, cardIds);
+      return c.json({ success: true }, 200);
+
+    } catch (error: any) {
+      console.error(`Error en ListController.sortCards para el id ${c.req.param('id')}:`, error);
+      if (error.message.includes('no existe')) {
+        return c.json({ error: error.message }, 404);
+      }
+      return c.json({ error: 'No se pudo ordenar las tarjetas' }, 500);
     }
   }
 }
@@ -188,3 +242,6 @@ listRoutes.put('/lists/:id', ListController.updateTitle);
 
 // Endpoint para eliminar una lista
 listRoutes.delete('/lists/:id', ListController.delete);
+
+// Endpoint para ordenar las tarjetas de una lista
+listRoutes.patch('/lists/:id/sort', ListController.sortCards);
