@@ -344,6 +344,35 @@ export class ActivityService {
   }
 
   /**
+   * Obtiene las actividades de un tablero específico
+   */
+  static async getBoardActivities(boardId: number, limit: number = 500): Promise<any[]> {
+    const query = `
+      SELECT
+        ca.id,
+        ca.card_id,
+        ca.user_id,
+        ca.activity_type,
+        ca.description,
+        ca.created_at,
+        c.title as card_title,
+        l.title as list_title,
+        u.email as user_email,
+        COALESCE(u.name, u.email) as user_name
+      FROM card_activity ca
+      JOIN cards c ON ca.card_id = c.id
+      JOIN lists l ON c.list_id = l.id
+      LEFT JOIN usuarios u ON ca.user_id = u.id
+      WHERE l.board_id = $1
+      ORDER BY ca.created_at DESC
+      LIMIT $2
+    `;
+
+    const result = await pool.query(query, [boardId, limit]);
+    return result.rows;
+  }
+
+  /**
    * Obtiene las actividades recientes de los tableros del usuario
    */
   static async getUserRecentActivities(userId: number, limit: number = 5): Promise<any[]> {
@@ -696,6 +725,28 @@ class ActivityController {
       return c.json({ error: 'Error interno del servidor' }, 500);
     }
   }
+
+  /**
+   * GET /boards/:boardId/activity - Obtener historial de actividades de un tablero
+   */
+  static async getBoardActivities(c: Context) {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+    const boardId = parseInt(c.req.param('boardId'));
+    if (isNaN(boardId)) {
+      return c.json({ error: 'ID de tablero inválido' }, 400);
+    }
+
+    try {
+      const limit = parseInt(c.req.query('limit') || '500');
+      const activities = await ActivityService.getBoardActivities(boardId, limit);
+      return c.json({ activities });
+    } catch (error: any) {
+      console.error(`Error obteniendo actividades del tablero ${boardId}:`, error);
+      return c.json({ error: 'Error interno del servidor' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -711,3 +762,6 @@ activityRoutes.delete('/activities/:activityId', keycloakAuthMiddleware, Activit
 
 // Rutas para actividades del usuario
 activityRoutes.get('/user/activities/recent', keycloakAuthMiddleware, ActivityController.getRecentActivities);
+
+// Ruta para historial de actividades del tablero
+activityRoutes.get('/boards/:boardId/activity', keycloakAuthMiddleware, requirePermission(PermissionAction.VIEW_BOARD), ActivityController.getBoardActivities);
