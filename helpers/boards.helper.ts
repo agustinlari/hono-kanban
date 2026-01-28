@@ -444,10 +444,6 @@ class BoardService {
         throw new Error('badge_settings.footer debe ser un objeto válido');
       }
 
-      if (!Array.isArray(badgeSettings.project_fields)) {
-        throw new Error('badge_settings.project_fields debe ser un array');
-      }
-
       // Validar que los campos del footer son booleanos
       const footerKeys = ['dates', 'progress', 'workload'];
       for (const key of footerKeys) {
@@ -456,14 +452,28 @@ class BoardService {
         }
       }
 
-      // Validar que los project_fields son strings no vacíos
-      for (const field of badgeSettings.project_fields) {
-        if (typeof field !== 'string' || field.trim() === '') {
-          throw new Error('Todos los project_fields deben ser strings no vacíos');
+      // Validar body_fields si existe (array de objetos con type y id)
+      if (badgeSettings.body_fields !== undefined) {
+        if (!Array.isArray(badgeSettings.body_fields)) {
+          throw new Error('badge_settings.body_fields debe ser un array');
+        }
+        for (const field of badgeSettings.body_fields) {
+          if (!field || typeof field !== 'object') {
+            throw new Error('Cada body_field debe ser un objeto');
+          }
+          if (field.type !== 'project' && field.type !== 'custom') {
+            throw new Error('body_field.type debe ser "project" o "custom"');
+          }
+          if (field.type === 'project' && typeof field.id !== 'string') {
+            throw new Error('body_field.id debe ser string para campos de proyecto');
+          }
+          if (field.type === 'custom' && typeof field.id !== 'number') {
+            throw new Error('body_field.id debe ser number para campos personalizados');
+          }
         }
       }
 
-      // Validar custom_fields si existe (opcional)
+      // Validar custom_fields si existe (opcional, para footer)
       if (badgeSettings.custom_fields !== undefined) {
         if (!Array.isArray(badgeSettings.custom_fields)) {
           throw new Error('badge_settings.custom_fields debe ser un array');
