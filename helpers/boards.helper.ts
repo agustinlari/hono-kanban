@@ -470,6 +470,37 @@ class BoardService {
           if (field.type === 'custom' && typeof field.id !== 'number') {
             throw new Error('body_field.id debe ser number para campos personalizados');
           }
+
+          // Validar config si existe (configuración visual del campo)
+          if (field.config !== undefined) {
+            if (typeof field.config !== 'object' || field.config === null) {
+              throw new Error('body_field.config debe ser un objeto');
+            }
+
+            // Validar prefix (máximo 10 caracteres)
+            if (field.config.prefix !== undefined) {
+              if (typeof field.config.prefix !== 'string' || field.config.prefix.length > 10) {
+                throw new Error('body_field.config.prefix debe ser string de máximo 10 caracteres');
+              }
+            }
+
+            // Validar textColor (color hex válido)
+            if (field.config.textColor !== undefined) {
+              if (typeof field.config.textColor !== 'string' ||
+                  !/^#[0-9A-Fa-f]{6}$/.test(field.config.textColor)) {
+                throw new Error('body_field.config.textColor debe ser un color hex válido (#RRGGBB)');
+              }
+            }
+
+            // Validar backgroundColor (color hex válido o 'transparent')
+            if (field.config.backgroundColor !== undefined) {
+              if (typeof field.config.backgroundColor !== 'string' ||
+                  (field.config.backgroundColor !== 'transparent' &&
+                   !/^#[0-9A-Fa-f]{6}$/.test(field.config.backgroundColor))) {
+                throw new Error('body_field.config.backgroundColor debe ser hex válido (#RRGGBB) o "transparent"');
+              }
+            }
+          }
         }
       }
 
