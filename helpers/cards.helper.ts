@@ -1472,6 +1472,182 @@ class CardService {
       client.release();
     }
   }
+
+  /**
+   * Copia una tarjeta existente con opciones para elegir qué elementos copiar
+   */
+  static async copyCard(
+    cardId: string,
+    userId: number,
+    options: {
+      copyDescription?: boolean;
+      copyAssignees?: boolean;
+      copyLabels?: boolean;
+      copyCustomFields?: boolean;
+      copyChecklists?: boolean;
+    }
+  ): Promise<Card> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Obtener la tarjeta original con todos sus datos
+      const originalCardResult = await client.query(`
+        SELECT c.*, l.title as list_title, l.board_id
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        WHERE c.id = $1
+      `, [cardId]);
+
+      if (originalCardResult.rowCount === 0) {
+        throw new Error('La tarjeta especificada no existe.');
+      }
+
+      const originalCard = originalCardResult.rows[0];
+      const listId = originalCard.list_id;
+      const originalPosition = originalCard.position;
+
+      // 2. Crear la nueva tarjeta con "(Copia)" al principio del título
+      const newTitle = `(Copia) ${originalCard.title}`;
+      const newCardResult = await client.query(`
+        INSERT INTO cards (
+          title,
+          description,
+          list_id,
+          position,
+          proyecto_id,
+          start_date,
+          due_date,
+          progress,
+          display_override
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `, [
+        newTitle,
+        options.copyDescription ? originalCard.description : null,
+        listId,
+        originalPosition + 1, // Justo debajo de la original
+        originalCard.proyecto_id,
+        originalCard.start_date,
+        originalCard.due_date,
+        0, // Progreso siempre empieza en 0
+        originalCard.display_override
+      ]);
+
+      const newCard = newCardResult.rows[0];
+      const newCardId = newCard.id;
+
+      // 3. Normalizar posiciones (mover las demás tarjetas hacia abajo)
+      await this.normalizePositions(client, listId, newCardId, originalPosition + 1);
+
+      // 4. Copiar asignados si está activado
+      if (options.copyAssignees) {
+        await client.query(`
+          INSERT INTO card_assignments (card_id, user_id, assigned_by, workload_hours, assignment_order)
+          SELECT $1, user_id, $2, workload_hours, assignment_order
+          FROM card_assignments
+          WHERE card_id = $3
+        `, [newCardId, userId, cardId]);
+      }
+
+      // 5. Copiar etiquetas si está activado
+      if (options.copyLabels) {
+        await client.query(`
+          INSERT INTO card_labels (card_id, label_id)
+          SELECT $1, label_id
+          FROM card_labels
+          WHERE card_id = $2
+        `, [newCardId, cardId]);
+      }
+
+      // 6. Copiar campos personalizados si está activado
+      if (options.copyCustomFields) {
+        await client.query(`
+          INSERT INTO card_custom_field_values (card_id, field_id, text_value, numeric_value, bool_value, date_value)
+          SELECT $1, field_id, text_value, numeric_value, bool_value, date_value
+          FROM card_custom_field_values
+          WHERE card_id = $2
+        `, [newCardId, cardId]);
+      }
+
+      // 7. Copiar checklists si está activado
+      if (options.copyChecklists) {
+        // Obtener los checklists originales
+        const checklistsResult = await client.query(`
+          SELECT id, title, position FROM card_checklists WHERE card_id = $1 ORDER BY position
+        `, [cardId]);
+
+        for (const checklist of checklistsResult.rows) {
+          // Crear el nuevo checklist
+          const newChecklistResult = await client.query(`
+            INSERT INTO card_checklists (card_id, title, position)
+            VALUES ($1, $2, $3)
+            RETURNING id
+          `, [newCardId, checklist.title, checklist.position]);
+
+          const newChecklistId = newChecklistResult.rows[0].id;
+
+          // Copiar los items del checklist (sin marcar como completados)
+          await client.query(`
+            INSERT INTO checklist_items (checklist_id, description, is_completed, position)
+            SELECT $1, description, false, position
+            FROM checklist_items
+            WHERE checklist_id = $2
+            ORDER BY position
+          `, [newChecklistId, checklist.id]);
+        }
+      }
+
+      // 8. Registrar actividad
+      await ActivityService.createActionWithClient(
+        client,
+        newCardId,
+        userId,
+        `copió esta tarjeta de "${originalCard.title}"`
+      );
+
+      await client.query('COMMIT');
+
+      // 9. Obtener la tarjeta completa con todas sus relaciones
+      const fullCardResult = await client.query(`
+        SELECT
+          c.*,
+          l.title as list_title,
+          l.board_id,
+          b.name as board_name
+        FROM cards c
+        INNER JOIN lists l ON c.list_id = l.id
+        INNER JOIN boards b ON l.board_id = b.id
+        WHERE c.id = $1
+      `, [newCardId]);
+
+      const fullCard = fullCardResult.rows[0];
+
+      // 10. Emitir evento SSE
+      SSEService.emitBoardEvent({
+        type: 'card:created',
+        boardId: fullCard.board_id,
+        payload: {
+          card: fullCard,
+          boardId: fullCard.board_id,
+          listId: listId,
+          userId: userId
+        }
+      });
+
+      console.log(`✅ Tarjeta copiada: ${originalCard.title} -> ${newTitle}`);
+
+      return fullCard;
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Error en CardService.copyCard:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 // ================================
@@ -1500,7 +1676,35 @@ class CardController {
       return c.json({ error: 'No se pudo crear la tarjeta' }, 500);
     }
   }
-    static async update(c: Context) {
+
+  static async copy(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const cardId = c.req.param('id');
+      const options = await c.req.json();
+
+      const copiedCard = await CardService.copyCard(cardId, user.userId, {
+        copyDescription: options.copyDescription ?? true,
+        copyAssignees: options.copyAssignees ?? true,
+        copyLabels: options.copyLabels ?? true,
+        copyCustomFields: options.copyCustomFields ?? true,
+        copyChecklists: options.copyChecklists ?? true
+      });
+
+      return c.json(copiedCard, 201);
+
+    } catch (error: any) {
+      console.error('Error en CardController.copy:', error);
+      if (error.message.includes('no existe')) {
+        return c.json({ error: error.message }, 404);
+      }
+      return c.json({ error: 'No se pudo copiar la tarjeta' }, 500);
+    }
+  }
+
+  static async update(c: Context) {
     try {
       const user = c.get('user');
       if (!user) return c.json({ error: 'No autorizado' }, 401);
@@ -1792,6 +1996,7 @@ cardRoutes.use('*', keycloakAuthMiddleware);
 
 // Endpoint para crear una nueva tarjeta
 cardRoutes.post('/cards', requirePermission(PermissionAction.CREATE_CARDS), CardController.create);
+cardRoutes.post('/cards/:id/copy', requirePermission(PermissionAction.CREATE_CARDS), CardController.copy);
 cardRoutes.put('/cards/:id', requirePermission(PermissionAction.EDIT_CARDS), CardController.update);
 cardRoutes.delete('/cards/:id', requirePermission(PermissionAction.DELETE_CARDS), CardController.delete);
 cardRoutes.patch('/cards/move', requirePermission(PermissionAction.MOVE_CARDS), CardController.move);
