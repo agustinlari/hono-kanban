@@ -94,16 +94,18 @@ class PackageService {
     // Obtener IDs de paquetes
     const packageIds = packages.map((p: Package) => p.id);
 
-    // Obtener las tarjetas vinculadas a estos paquetes con sus custom fields (OT=9, Importe=12)
+    // Obtener las tarjetas vinculadas a estos paquetes con sus custom fields (OT=9, Importe=12) y board_id
     const cardsQuery = `
       SELECT
         cp.package_id,
         c.id as card_id,
         c.title as card_title,
+        l.board_id,
         cf_ot.text_value as ot_value,
         cf_importe.numeric_value as importe_value
       FROM cards_packages cp
       INNER JOIN cards c ON cp.card_id = c.id
+      INNER JOIN lists l ON c.list_id = l.id
       LEFT JOIN card_custom_field_values cf_ot ON c.id = cf_ot.card_id AND cf_ot.field_id = 9
       LEFT JOIN card_custom_field_values cf_importe ON c.id = cf_importe.card_id AND cf_importe.field_id = 12
       WHERE cp.package_id = ANY($1)
@@ -120,6 +122,7 @@ class PackageService {
       cardsByPackage[row.package_id].push({
         card_id: row.card_id,
         card_title: row.card_title,
+        board_id: row.board_id,
         ot: row.ot_value,
         importe: row.importe_value
       });
@@ -329,6 +332,15 @@ class PackageService {
    * Desvincula un package de una tarjeta
    */
   static async unlinkPackageFromCard(cardId: string, packageId: number): Promise<boolean> {
+    // Verificar que el paquete no esté recolectado
+    const packageCheck = await pool.query(
+      'SELECT is_collected FROM packages WHERE id = $1',
+      [packageId]
+    );
+    if (packageCheck.rows[0]?.is_collected) {
+      throw new Error('No se puede desvincular un paquete recolectado. Primero márcalo como pendiente.');
+    }
+
     const deleteResult = await pool.query(
       'DELETE FROM cards_packages WHERE card_id = $1 AND package_id = $2',
       [cardId, packageId]
@@ -567,6 +579,9 @@ class PackageController {
       return c.body(null, 204);
     } catch (error: any) {
       console.error('Error en PackageController.unlinkPackageFromCard:', error);
+      if (error.message?.includes('recolectado')) {
+        return c.json({ error: error.message }, 400);
+      }
       return c.json({ error: 'No se pudo desvincular el paquete' }, 500);
     }
   }
