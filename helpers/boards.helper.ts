@@ -523,6 +523,22 @@ class BoardService {
         }
       }
 
+      // Validar visible_tabs si existe (pestañas visibles en el modal de tarjetas)
+      if (badgeSettings.visible_tabs !== undefined) {
+        if (typeof badgeSettings.visible_tabs !== 'object' || badgeSettings.visible_tabs === null) {
+          throw new Error('badge_settings.visible_tabs debe ser un objeto');
+        }
+        const validTabKeys = ['customFields', 'labels', 'description', 'project', 'dates', 'assignees', 'checklists', 'attachments', 'packages'];
+        for (const [key, value] of Object.entries(badgeSettings.visible_tabs)) {
+          if (!validTabKeys.includes(key)) {
+            throw new Error(`visible_tabs contiene una clave inválida: ${key}`);
+          }
+          if (typeof value !== 'boolean') {
+            throw new Error(`visible_tabs.${key} debe ser un booleano`);
+          }
+        }
+      }
+
       // Actualizar en la base de datos
       const query = `
         UPDATE boards
