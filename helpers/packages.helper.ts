@@ -73,6 +73,66 @@ class PackageService {
   }
 
   /**
+   * Obtiene todos los packages con información de tarjetas vinculadas y custom fields
+   */
+  static async getAllPackagesWithCards(limit: number = 500): Promise<any[]> {
+    // Primero obtenemos los paquetes no consolidados
+    const packagesQuery = `
+      SELECT id, code, height, width, depth, weight, is_consolidated, is_collected, notes, created_by, created_at
+      FROM packages
+      WHERE is_consolidated = false
+      ORDER BY created_at DESC
+      LIMIT $1
+    `;
+    const packagesResult = await pool.query(packagesQuery, [limit]);
+    const packages = packagesResult.rows;
+
+    if (packages.length === 0) {
+      return [];
+    }
+
+    // Obtener IDs de paquetes
+    const packageIds = packages.map((p: Package) => p.id);
+
+    // Obtener las tarjetas vinculadas a estos paquetes con sus custom fields (OT=9, Importe=12)
+    const cardsQuery = `
+      SELECT
+        cp.package_id,
+        c.id as card_id,
+        c.title as card_title,
+        cf_ot.text_value as ot_value,
+        cf_importe.numeric_value as importe_value
+      FROM cards_packages cp
+      INNER JOIN cards c ON cp.card_id = c.id
+      LEFT JOIN card_custom_field_values cf_ot ON c.id = cf_ot.card_id AND cf_ot.field_id = 9
+      LEFT JOIN card_custom_field_values cf_importe ON c.id = cf_importe.card_id AND cf_importe.field_id = 12
+      WHERE cp.package_id = ANY($1)
+      ORDER BY cp.linked_at DESC
+    `;
+    const cardsResult = await pool.query(cardsQuery, [packageIds]);
+
+    // Agrupar tarjetas por package_id
+    const cardsByPackage: Record<number, any[]> = {};
+    for (const row of cardsResult.rows) {
+      if (!cardsByPackage[row.package_id]) {
+        cardsByPackage[row.package_id] = [];
+      }
+      cardsByPackage[row.package_id].push({
+        card_id: row.card_id,
+        card_title: row.card_title,
+        ot: row.ot_value,
+        importe: row.importe_value
+      });
+    }
+
+    // Añadir la información de tarjetas a cada paquete
+    return packages.map((pkg: Package) => ({
+      ...pkg,
+      linked_cards: cardsByPackage[pkg.id] || []
+    }));
+  }
+
+  /**
    * Busca packages por código o notas
    */
   static async searchPackages(searchTerm: string, limit: number = 50): Promise<Package[]> {
@@ -317,6 +377,20 @@ class PackageController {
   }
 
   /**
+   * Obtiene todos los packages con información de tarjetas vinculadas
+   */
+  static async getAllPackagesWithCards(c: Context) {
+    try {
+      const limit = parseInt(c.req.query('limit') || '500');
+      const packages = await PackageService.getAllPackagesWithCards(limit);
+      return c.json(packages);
+    } catch (error: any) {
+      console.error('Error en PackageController.getAllPackagesWithCards:', error);
+      return c.json({ error: 'Error al obtener los paquetes con tarjetas' }, 500);
+    }
+  }
+
+  /**
    * Busca packages por término
    */
   static async searchPackages(c: Context) {
@@ -531,6 +605,7 @@ packageRoutes.use('*', keycloakAuthMiddleware);
 
 // Rutas de packages (CRUD global)
 packageRoutes.get('/packages', PackageController.getAllPackages);
+packageRoutes.get('/packages/with-cards', PackageController.getAllPackagesWithCards);
 packageRoutes.get('/packages/search', PackageController.searchPackages);
 packageRoutes.get('/packages/:id', PackageController.getPackageById);
 packageRoutes.post('/packages', PackageController.createPackage);
