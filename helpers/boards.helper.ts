@@ -119,7 +119,8 @@ class BoardService {
         cfv.bool_value,
         cfv.date_value,
         cfd.name as field_name,
-        cfd.data_type as field_data_type
+        cfd.data_type as field_data_type,
+        cfd.units as field_units
       FROM card_custom_field_values cfv
       INNER JOIN custom_field_definitions cfd ON cfv.field_id = cfd.id
       INNER JOIN cards c ON cfv.card_id = c.id
@@ -186,6 +187,7 @@ class BoardService {
         field_id: cfRow.field_id,
         field_name: cfRow.field_name,
         data_type: cfRow.field_data_type,
+        units: cfRow.field_units,
         text_value: cfRow.text_value,
         numeric_value: cfRow.numeric_value !== null ? parseFloat(cfRow.numeric_value) : null,
         bool_value: cfRow.bool_value,

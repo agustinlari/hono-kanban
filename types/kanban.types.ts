@@ -341,6 +341,7 @@ export interface CustomFieldDefinition {
   description: string | null;
   data_type: CustomFieldDataType;
   options: string[] | null; // Para tipo 'select'
+  units: string | null; // Unidades para campos numéricos (€, kg, etc.)
   created_by: number | null;
   created_at: Date | null;
 }
@@ -368,6 +369,7 @@ export interface CreateCustomFieldPayload {
   description?: string;
   data_type: CustomFieldDataType;
   options?: string[]; // Requerido para tipo 'select'
+  units?: string; // Unidades para campos numéricos (€, kg, etc.)
 }
 
 /**
@@ -378,6 +380,7 @@ export interface UpdateCustomFieldPayload {
   description?: string;
   data_type?: CustomFieldDataType;
   options?: string[];
+  units?: string; // Unidades para campos numéricos (€, kg, etc.)
 }
 
 /**

@@ -22,7 +22,7 @@ class CustomFieldService {
    */
   static async getAllDefinitions(): Promise<CustomFieldDefinition[]> {
     const query = `
-      SELECT id, name, description, data_type, options, created_by, created_at
+      SELECT id, name, description, data_type, options, units, created_by, created_at
       FROM custom_field_definitions
       ORDER BY name ASC
     `;
@@ -35,7 +35,7 @@ class CustomFieldService {
    */
   static async getDefinitionById(id: number): Promise<CustomFieldDefinition | null> {
     const query = `
-      SELECT id, name, description, data_type, options, created_by, created_at
+      SELECT id, name, description, data_type, options, units, created_by, created_at
       FROM custom_field_definitions
       WHERE id = $1
     `;
@@ -47,11 +47,11 @@ class CustomFieldService {
    * Crea una nueva definición de campo personalizado
    */
   static async createDefinition(data: CreateCustomFieldPayload, userId: number): Promise<CustomFieldDefinition> {
-    const { name, description, data_type, options } = data;
+    const { name, description, data_type, options, units } = data;
 
     const query = `
-      INSERT INTO custom_field_definitions (name, description, data_type, options, created_by)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO custom_field_definitions (name, description, data_type, options, units, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -59,6 +59,7 @@ class CustomFieldService {
       description || null,
       data_type,
       options ? JSON.stringify(options) : null,
+      units || null,
       userId
     ]);
     return result.rows[0] as CustomFieldDefinition;
@@ -127,7 +128,8 @@ class CustomFieldService {
         d.name as "field_name",
         d.description as "field_description",
         d.data_type as "field_data_type",
-        d.options as "field_options"
+        d.options as "field_options",
+        d.units as "field_units"
       FROM card_custom_field_values v
       INNER JOIN custom_field_definitions d ON v.field_id = d.id
       WHERE v.card_id = $1
@@ -151,6 +153,7 @@ class CustomFieldService {
         description: row.field_description,
         data_type: row.field_data_type,
         options: row.field_options,
+        units: row.field_units,
         created_by: null,
         created_at: null
       }
