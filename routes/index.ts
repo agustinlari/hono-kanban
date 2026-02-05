@@ -24,6 +24,7 @@ import { activityRoutes } from '../helpers/activity.helper';
 import { notificationRoutes } from '../helpers/notifications.helper';
 import { notificationPreferenceRoutes } from '../helpers/notification-preferences.helper';
 import { sseRoutes } from '../helpers/sse.helper';
+import { syncRoutes } from '../helpers/sync.helper';
 import { roadmapRoutes } from '../helpers/roadmap.helper';
 import { dashboardRoutes } from '../helpers/dashboard.helper';
 import { cardLinkRoutes } from '../helpers/card-links.helper';
@@ -76,6 +77,9 @@ routes.use('/wallpapers/*', serveStatic({
 
 // IMPORTANTE: SSE routes PRIMERO porque no usa middleware de auth estándar
 routes.route('/', sseRoutes);
+
+// Sync routes - también antes de auth porque el agente usa API key
+routes.route('/', syncRoutes);
 
 // IMPORTANTE: keycloakAuthRoutes después para evitar conflictos de rutas
 routes.route('/', keycloakAuthRoutes);
