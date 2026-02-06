@@ -1303,11 +1303,27 @@ class CardService {
       const params: any[] = [userId];
       let paramIndex = 2;
 
-      // Filtro de búsqueda de texto
+      // Filtro de búsqueda de texto (título, descripción, proyecto y campos personalizados)
       if (searchTerm && searchTerm.trim()) {
         query += ` AND (
           c.title ILIKE $${paramIndex} OR
-          c.description ILIKE $${paramIndex}
+          c.description ILIKE $${paramIndex} OR
+          p.nombre_proyecto ILIKE $${paramIndex} OR
+          p.codigo ILIKE $${paramIndex} OR
+          p.cod_integracion ILIKE $${paramIndex} OR
+          p.cadena ILIKE $${paramIndex} OR
+          p.mercado ILIKE $${paramIndex} OR
+          p.ciudad ILIKE $${paramIndex} OR
+          p.inmueble ILIKE $${paramIndex} OR
+          p.numero_obra_osmos ILIKE $${paramIndex} OR
+          EXISTS (
+            SELECT 1 FROM card_custom_field_values cfv_search
+            WHERE cfv_search.card_id = c.id
+            AND (
+              cfv_search.text_value ILIKE $${paramIndex} OR
+              cfv_search.numeric_value::text ILIKE $${paramIndex}
+            )
+          )
         )`;
         params.push(`%${searchTerm.trim()}%`);
         paramIndex++;
