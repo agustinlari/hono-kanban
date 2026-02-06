@@ -103,7 +103,7 @@ class PackageService {
     // Obtener IDs de paquetes
     const packageIds = packages.map((p: Package) => p.id);
 
-    // Obtener las tarjetas vinculadas a estos paquetes con sus custom fields (OT=9, Importe=12) y board_id
+    // Obtener las tarjetas vinculadas a estos paquetes con sus custom fields (OT=9, Importe=12), board_id y proyecto
     const cardsQuery = `
       SELECT
         cp.package_id,
@@ -111,12 +111,16 @@ class PackageService {
         c.title as card_title,
         l.board_id,
         cf_ot.text_value as ot_value,
-        cf_importe.numeric_value as importe_value
+        cf_importe.numeric_value as importe_value,
+        p.numero_obra_osmos,
+        p.ciudad,
+        p.mercado
       FROM cards_packages cp
       INNER JOIN cards c ON cp.card_id = c.id
       INNER JOIN lists l ON c.list_id = l.id
       LEFT JOIN card_custom_field_values cf_ot ON c.id = cf_ot.card_id AND cf_ot.field_id = 9
       LEFT JOIN card_custom_field_values cf_importe ON c.id = cf_importe.card_id AND cf_importe.field_id = 12
+      LEFT JOIN proyectos p ON c.proyecto_id = p.id
       WHERE cp.package_id = ANY($1)
       ORDER BY cp.linked_at DESC
     `;
@@ -133,7 +137,10 @@ class PackageService {
         card_title: row.card_title,
         board_id: row.board_id,
         ot: row.ot_value,
-        importe: row.importe_value
+        importe: row.importe_value,
+        numero_obra_osmos: row.numero_obra_osmos,
+        ciudad: row.ciudad,
+        mercado: row.mercado
       });
     }
 
