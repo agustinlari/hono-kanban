@@ -20,7 +20,6 @@ interface Package {
   is_consolidated: boolean;
   is_collected: boolean;
   pallet: boolean;
-  packaging: string | null;
   notes: string | null;
   created_by: number | null;
   created_at: string;
@@ -45,7 +44,6 @@ interface CreatePackagePayload {
   is_consolidated?: boolean;
   is_collected?: boolean;
   pallet?: boolean;
-  packaging?: string;
   notes?: string;
 }
 
@@ -59,7 +57,6 @@ interface UpdatePackagePayload {
   is_consolidated?: boolean;
   is_collected?: boolean;
   pallet?: boolean;
-  packaging?: string;
   notes?: string;
 }
 
@@ -72,7 +69,7 @@ class PackageService {
    */
   static async getAllPackages(limit: number = 100, offset: number = 0): Promise<Package[]> {
     const query = `
-      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes, created_by, created_at
+      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes, created_by, created_at
       FROM packages
       ORDER BY created_at DESC
       LIMIT $1 OFFSET $2
@@ -87,7 +84,7 @@ class PackageService {
   static async getAllPackagesWithCards(limit: number = 500): Promise<any[]> {
     // Primero obtenemos los paquetes no consolidados
     const packagesQuery = `
-      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes, created_by, created_at
+      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes, created_by, created_at
       FROM packages
       WHERE is_consolidated = false
       ORDER BY created_at DESC
@@ -156,7 +153,7 @@ class PackageService {
    */
   static async searchPackages(searchTerm: string, limit: number = 50): Promise<Package[]> {
     const query = `
-      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes, created_by, created_at
+      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes, created_by, created_at
       FROM packages
       WHERE code ILIKE $1 OR notes ILIKE $1
       ORDER BY created_at DESC
@@ -171,7 +168,7 @@ class PackageService {
    */
   static async getPackageById(id: number): Promise<Package | null> {
     const query = `
-      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes, created_by, created_at
+      SELECT id, code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes, created_by, created_at
       FROM packages
       WHERE id = $1
     `;
@@ -183,11 +180,11 @@ class PackageService {
    * Crea un nuevo package
    */
   static async createPackage(data: CreatePackagePayload, userId: number): Promise<Package> {
-    const { code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes } = data;
+    const { code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes } = data;
 
     const query = `
-      INSERT INTO packages (code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, packaging, notes, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      INSERT INTO packages (code, height, width, depth, weight, quantity, is_consolidated, is_collected, pallet, notes, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
     const result = await pool.query(query, [
@@ -200,7 +197,6 @@ class PackageService {
       is_consolidated || false,
       is_collected || false,
       pallet || false,
-      packaging || 'Cartón',
       notes || null,
       userId
     ]);
@@ -261,7 +257,6 @@ class PackageService {
         p.is_consolidated as "pkg_is_consolidated",
         p.is_collected as "pkg_is_collected",
         p.pallet as "pkg_pallet",
-        p.packaging as "pkg_packaging",
         p.notes as "pkg_notes",
         p.created_by as "pkg_created_by",
         p.created_at as "pkg_created_at"
@@ -289,7 +284,6 @@ class PackageService {
         is_consolidated: row.pkg_is_consolidated,
         is_collected: row.pkg_is_collected,
         pallet: row.pkg_pallet,
-        packaging: row.pkg_packaging,
         notes: row.pkg_notes,
         created_by: row.pkg_created_by,
         created_at: row.pkg_created_at
