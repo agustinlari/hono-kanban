@@ -563,6 +563,57 @@ class BoardService {
   }
 
   /**
+   * Actualiza la configuración de vista tabla de un tablero
+   */
+  static async updateTableViewSettings(boardId: number, settings: any): Promise<any> {
+    try {
+      if (!settings || typeof settings !== 'object') {
+        throw new Error('table_view_settings debe ser un objeto válido');
+      }
+
+      if (!Array.isArray(settings.columns)) {
+        throw new Error('table_view_settings.columns debe ser un array');
+      }
+
+      for (const col of settings.columns) {
+        if (!col || typeof col !== 'object') {
+          throw new Error('Cada columna debe ser un objeto');
+        }
+        if (typeof col.id !== 'string' || col.id.length === 0) {
+          throw new Error('column.id debe ser un string no vacío');
+        }
+        if (col.type !== 'card' && col.type !== 'project' && col.type !== 'custom_field') {
+          throw new Error('column.type debe ser "card", "project" o "custom_field"');
+        }
+        if (typeof col.visible !== 'boolean') {
+          throw new Error('column.visible debe ser un booleano');
+        }
+        if (col.width !== undefined && (typeof col.width !== 'number' || col.width < 0)) {
+          throw new Error('column.width debe ser un número positivo');
+        }
+      }
+
+      const query = `
+        UPDATE boards
+        SET table_view_settings = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING table_view_settings
+      `;
+
+      const result = await pool.query(query, [JSON.stringify(settings), boardId]);
+
+      if (!result.rowCount || result.rowCount === 0) {
+        throw new Error('Tablero no encontrado');
+      }
+
+      return result.rows[0].table_view_settings;
+    } catch (error) {
+      console.error('Error en BoardService.updateTableViewSettings:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Obtiene los custom fields que tienen al menos un valor en las tarjetas del tablero
    */
   static async getBoardCustomFields(boardId: number): Promise<any[]> {
@@ -740,6 +791,41 @@ class BoardController {
   }
 
   /**
+   * Actualiza la configuración de vista tabla de un tablero
+   */
+  static async updateTableViewSettings(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+
+      const boardId = parseInt(c.req.param('id'));
+      if (isNaN(boardId)) {
+        return c.json({ error: 'ID de tablero inválido' }, 400);
+      }
+
+      const permissionQuery = `
+        SELECT can_edit_board
+        FROM board_members
+        WHERE board_id = $1 AND user_id = $2
+      `;
+      const permissionResult = await pool.query(permissionQuery, [boardId, user.userId]);
+
+      if (!permissionResult.rowCount || !permissionResult.rows[0].can_edit_board) {
+        return c.json({ error: 'No tienes permiso para editar la configuración de este tablero' }, 403);
+      }
+
+      const settings = await c.req.json();
+      const updatedSettings = await BoardService.updateTableViewSettings(boardId, settings);
+
+      return c.json({ table_view_settings: updatedSettings }, 200);
+
+    } catch (error: any) {
+      console.error(`Error en BoardController.updateTableViewSettings para board ${c.req.param('id')}:`, error);
+      return c.json({ error: error.message || 'No se pudo actualizar la configuración de vista tabla' }, 500);
+    }
+  }
+
+  /**
    * Obtiene los custom fields que tienen valores en las tarjetas del tablero
    */
   static async getBoardCustomFields(c: Context) {
@@ -776,6 +862,7 @@ boardRoutes.delete('/boards/:id', requireOwnership(), BoardController.delete);
 boardRoutes.get('/boards/:id/lists', requireBoardAccess(), BoardController.getListsOfBoard);
 boardRoutes.get('/boards/:id/users', requireBoardAccess(), BoardController.getBoardUsers);
 boardRoutes.put('/boards/:id/badge-settings', requireBoardAccess(), BoardController.updateBadgeSettings);
+boardRoutes.put('/boards/:id/table-view-settings', requireBoardAccess(), BoardController.updateTableViewSettings);
 boardRoutes.get('/boards/:id/custom-fields', requireBoardAccess(), BoardController.getBoardCustomFields);
 
 export { BoardController };
