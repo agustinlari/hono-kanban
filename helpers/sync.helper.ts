@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import { pool } from '../config/database';
 import type { Variables } from '../types';
 import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
+import NodeGeocoder from 'node-geocoder';
 
 // ================================
 // Configuración
@@ -27,6 +28,7 @@ interface ProyectoERP {
   envpai: string;      // -> mercado
   envpob: string;      // -> ciudad
   envdir: string;      // -> inmueble
+  envcpo: string;      // -> codigo_postal
   numobr: string;      // -> numero_obra_osmos (clave para UPSERT)
   nombre: string;      // -> descripcion
 }
@@ -152,15 +154,17 @@ class SyncService {
               mercado = $3,
               ciudad = $4,
               inmueble = $5,
-              descripcion = $6,
+              codigo_postal = $6,
+              descripcion = $7,
               fecha_cambio = NOW()
-            WHERE numero_obra_osmos = $7
+            WHERE numero_obra_osmos = $8
           `, [
             p.fpacod || null,
             p.inscli || null,
             p.envpai || null,
             p.envpob || null,
             p.envdir || null,
+            p.envcpo || null,
             p.nombre || null,
             p.numobr
           ]);
@@ -170,14 +174,15 @@ class SyncService {
           await client.query(`
             INSERT INTO proyectos (
               nombre_proyecto, cadena, mercado, ciudad, inmueble,
-              descripcion, numero_obra_osmos, creado_manualmente, activo
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, true)
+              codigo_postal, descripcion, numero_obra_osmos, creado_manualmente, activo
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, true)
           `, [
             p.fpacod || null,
             p.inscli || null,
             p.envpai || null,
             p.envpob || null,
             p.envdir || null,
+            p.envcpo || null,
             p.nombre || null,
             p.numobr
           ]);
@@ -187,6 +192,11 @@ class SyncService {
 
       await client.query('COMMIT');
       console.log(`✅ Sincronización completada: ${inserted} insertados, ${updated} actualizados`);
+
+      // Geocodificar proyectos sin coordenadas (en background, no bloquea)
+      geocodeProjectsWithoutCoordinates().catch(err => {
+        console.error('⚠️ Error en geocodificación post-sync:', err);
+      });
 
       // Resolver la promesa pendiente si existe
       if (this.pendingRequest) {
@@ -235,6 +245,96 @@ class SyncService {
 setInterval(() => {
   SyncService.sendHeartbeat();
 }, 30000);
+
+// ================================
+// Geocodificación
+// ================================
+const geocoder = NodeGeocoder({
+  provider: 'openstreetmap',
+  timeout: 5000,
+  'user-agent': 'kanban-logistics/1.0'
+} as any);
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Geocodifica proyectos que tienen dirección pero no coordenadas.
+ * Usa estrategia de fallback: dirección completa → ciudad+país → solo ciudad.
+ * Respeta el rate limit de Nominatim (1 req/s).
+ */
+async function geocodeProjectsWithoutCoordinates(): Promise<void> {
+  const result = await pool.query(`
+    SELECT id, ciudad, inmueble, codigo_postal, mercado
+    FROM proyectos
+    WHERE latitud IS NULL
+      AND (ciudad IS NOT NULL OR inmueble IS NOT NULL OR codigo_postal IS NOT NULL)
+  `);
+
+  if (result.rows.length === 0) {
+    return;
+  }
+
+  console.log(`🗺️ Geocodificando ${result.rows.length} proyectos...`);
+  let ok = 0;
+  let failed = 0;
+
+  for (const row of result.rows) {
+    try {
+      // Construir variantes de dirección (de más específica a menos)
+      const attempts: string[] = [];
+
+      // 1) Dirección completa
+      const fullParts: string[] = [];
+      if (row.inmueble) fullParts.push(row.inmueble);
+      if (row.codigo_postal) fullParts.push(row.codigo_postal);
+      if (row.ciudad) fullParts.push(row.ciudad);
+      if (row.mercado) fullParts.push(row.mercado);
+      if (fullParts.length > 0) attempts.push(fullParts.join(', '));
+
+      // 2) Sin inmueble (código postal + ciudad + país)
+      if (row.inmueble && (row.ciudad || row.codigo_postal)) {
+        const noParts: string[] = [];
+        if (row.codigo_postal) noParts.push(row.codigo_postal);
+        if (row.ciudad) noParts.push(row.ciudad);
+        if (row.mercado) noParts.push(row.mercado);
+        const noInmueble = noParts.join(', ');
+        if (noInmueble !== attempts[0]) attempts.push(noInmueble);
+      }
+
+      // 3) Solo ciudad + país
+      if (row.ciudad && row.mercado) {
+        const cityCountry = `${row.ciudad}, ${row.mercado}`;
+        if (!attempts.includes(cityCountry)) attempts.push(cityCountry);
+      }
+
+      if (attempts.length === 0) continue;
+
+      let found = false;
+      for (const address of attempts) {
+        const results = await geocoder.geocode(address);
+        await delay(1100);
+
+        if (results && results.length > 0) {
+          await pool.query(
+            'UPDATE proyectos SET latitud = $1, longitud = $2 WHERE id = $3',
+            [results[0].latitude, results[0].longitude, row.id]
+          );
+          ok++;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) failed++;
+    } catch (err) {
+      console.error(`⚠️ Error geocodificando proyecto ${row.id}:`, err);
+      failed++;
+      await delay(1100);
+    }
+  }
+
+  console.log(`Done! OK: ${ok} Failed: ${failed}`);
+}
 
 // ================================
 // Rutas
@@ -339,4 +439,22 @@ syncRoutes.get('/sync/status', keycloakAuthMiddleware, async (c: Context) => {
     agentConnected: SyncService.isAgentConnected(),
     timestamp: new Date().toISOString()
   });
+});
+
+/**
+ * Endpoint para forzar geocodificación de proyectos sin coordenadas
+ * Requiere autenticación JWT
+ */
+syncRoutes.post('/sync/geocode', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    geocodeProjectsWithoutCoordinates().catch(err => {
+      console.error('⚠️ Error en geocodificación manual:', err);
+    });
+    return c.json({
+      success: true,
+      message: 'Geocodificación iniciada en segundo plano'
+    });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
 });

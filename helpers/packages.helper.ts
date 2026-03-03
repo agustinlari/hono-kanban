@@ -112,7 +112,11 @@ class PackageService {
         cf_importe.numeric_value as importe_value,
         p.numero_obra_osmos,
         p.ciudad,
-        p.mercado
+        p.mercado,
+        p.inmueble,
+        p.codigo_postal,
+        p.latitud,
+        p.longitud
       FROM cards_packages cp
       INNER JOIN cards c ON cp.card_id = c.id
       INNER JOIN lists l ON c.list_id = l.id
@@ -139,7 +143,11 @@ class PackageService {
         importe: row.importe_value,
         numero_obra_osmos: row.numero_obra_osmos,
         ciudad: row.ciudad,
-        mercado: row.mercado
+        mercado: row.mercado,
+        inmueble: row.inmueble,
+        codigo_postal: row.codigo_postal,
+        latitud: row.latitud ? parseFloat(row.latitud) : null,
+        longitud: row.longitud ? parseFloat(row.longitud) : null
       });
     }
 
