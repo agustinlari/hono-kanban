@@ -109,6 +109,21 @@ class BoardService {
     `;
     const checklistsResult = await pool.query(checklistsQuery, [id]);
 
+    // 5b. Obtener contadores de paquetes (recolectados/totales) por tarjeta
+    const packagesQuery = `
+      SELECT
+        cp.card_id,
+        COUNT(*)::int as packages_total,
+        SUM(CASE WHEN p.is_collected = true THEN 1 ELSE 0 END)::int as packages_collected
+      FROM cards_packages cp
+      JOIN packages p ON cp.package_id = p.id
+      JOIN cards c ON c.id = cp.card_id
+      JOIN lists l ON c.list_id = l.id
+      WHERE l.board_id = $1 AND p.is_consolidated = false
+      GROUP BY cp.card_id
+    `;
+    const packagesResult = await pool.query(packagesQuery, [id]);
+
     // 6. Obtener todos los custom field values de las tarjetas del tablero
     const customFieldsQuery = `
       SELECT
@@ -177,6 +192,15 @@ class BoardService {
       });
     }
 
+    // 6b. Crear un mapa de contadores de paquetes por tarjeta
+    const cardPackagesMap = new Map<string, { packages_total: number, packages_collected: number }>();
+    for (const pkgRow of packagesResult.rows) {
+      cardPackagesMap.set(pkgRow.card_id, {
+        packages_total: pkgRow.packages_total || 0,
+        packages_collected: pkgRow.packages_collected || 0
+      });
+    }
+
     // 7. Crear un mapa de custom field values por tarjeta
     const cardCustomFieldsMap = new Map<string, any[]>();
     for (const cfRow of customFieldsResult.rows) {
@@ -216,6 +240,7 @@ class BoardService {
       if (row.card_id) {
         const list = listsMap.get(row.list_id)!;
         const checklistStats = cardChecklistsMap.get(row.card_id) || { total_items: 0, completed_items: 0 };
+        const packageStats = cardPackagesMap.get(row.card_id) || { packages_total: 0, packages_collected: 0 };
         const cardData: any = {
           id: row.card_id,
           title: row.card_title,
@@ -236,6 +261,8 @@ class BoardService {
           assignees: cardAssigneesMap.get(row.card_id) || [],
           checklist_items_total: checklistStats.total_items,
           checklist_items_completed: checklistStats.completed_items,
+          packages_total: packageStats.packages_total,
+          packages_collected: packageStats.packages_collected,
           custom_field_values: cardCustomFieldsMap.get(row.card_id) || []
         };
 
