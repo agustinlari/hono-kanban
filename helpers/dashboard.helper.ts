@@ -105,7 +105,166 @@ export class DashboardService {
     }
   }
 
-  // Nuevos métodos irán aquí
+  /**
+   * KPI Cartón: cuenta cartones consumidos por cuadros Prisma P salidos este año.
+   * - field_id=8: Fecha salida taller (filtra año actual)
+   * - field_id=15: Tipo armario (filtra text_value='Prisma P')
+   * - field_id=16: Nº paneles -> x2 cartones cada uno
+   * - field_id=21: Nº patinillos -> x2 cartones cada uno
+   */
+  static async getCartonKpi() {
+    const currentYear = new Date().getFullYear();
+    const startOfYear = `${currentYear}-01-01`;
+
+    const query = `
+      SELECT
+        COALESCE(SUM(COALESCE(f16.numeric_value, 0) * 2 + COALESCE(f21.numeric_value, 0) * 2), 0) as total_cartones,
+        COUNT(*) as total_cuadros
+      FROM cards c
+      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
+      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15 AND f15.text_value = 'Prisma P'
+      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
+      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
+      WHERE f8.date_value >= $1
+        AND f8.date_value <= CURRENT_DATE
+    `;
+    const result = await pool.query(query, [startOfYear]);
+
+    return {
+      totalCartones: parseInt(result.rows[0]?.total_cartones || '0'),
+      totalCuadros: parseInt(result.rows[0]?.total_cuadros || '0'),
+      year: currentYear,
+    };
+  }
+
+  /**
+   * Gráfica acumulativa de cartón por semana (Prisma P, año actual).
+   * Devuelve todas las semanas del año (S1..S52) con el acumulado hasta cada una.
+   */
+  static async getCartonWeeklyChart() {
+    const currentYear = new Date().getFullYear();
+    const startOfYear = `${currentYear}-01-01`;
+
+    const query = `
+      SELECT
+        EXTRACT(WEEK FROM f8.date_value)::int as semana,
+        SUM(COALESCE(f16.numeric_value, 0) * 2 + COALESCE(f21.numeric_value, 0) * 2) as cartones
+      FROM cards c
+      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
+      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15 AND f15.text_value = 'Prisma P'
+      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
+      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
+      WHERE f8.date_value >= $1
+        AND f8.date_value <= CURRENT_DATE
+      GROUP BY EXTRACT(WEEK FROM f8.date_value)
+      ORDER BY semana
+    `;
+    const result = await pool.query(query, [startOfYear]);
+
+    // Semana actual del año
+    const now = new Date();
+    const startOfYearDate = new Date(currentYear, 0, 1);
+    const diff = now.getTime() - startOfYearDate.getTime();
+    const currentWeek = Math.ceil((diff / (1000 * 60 * 60 * 24) + startOfYearDate.getDay() + 1) / 7);
+
+    // Mapa de datos por semana
+    const weekMap = new Map<number, number>();
+    result.rows.forEach(row => {
+      weekMap.set(row.semana, parseInt(row.cartones));
+    });
+
+    // Generar todas las semanas desde S1 hasta la semana actual
+    const labels: string[] = [];
+    const weekly: number[] = [];
+    const cumulative: number[] = [];
+    let runningTotal = 0;
+
+    for (let w = 1; w <= currentWeek; w++) {
+      labels.push(`S${w}`);
+      const weekValue = weekMap.get(w) || 0;
+      weekly.push(weekValue);
+      runningTotal += weekValue;
+      cumulative.push(runningTotal);
+    }
+
+    return { labels, weekly, cumulative, year: currentYear };
+  }
+
+  /**
+   * KPI Poliestireno: 1 unidad por panel + 1 por patinillo (todos los tipos de envolvente).
+   * Filtra por field_id=8 (fecha salida taller) en el año actual.
+   */
+  static async getPoliestirenoKpi() {
+    const currentYear = new Date().getFullYear();
+    const startOfYear = `${currentYear}-01-01`;
+
+    const query = `
+      SELECT
+        COALESCE(SUM(COALESCE(f16.numeric_value, 0) + COALESCE(f21.numeric_value, 0)), 0) as total_poliestireno,
+        COUNT(*) as total_cuadros
+      FROM cards c
+      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
+      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
+      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
+      WHERE f8.date_value >= $1
+        AND f8.date_value <= CURRENT_DATE
+    `;
+    const result = await pool.query(query, [startOfYear]);
+
+    return {
+      totalPoliestireno: parseInt(result.rows[0]?.total_poliestireno || '0'),
+      totalCuadros: parseInt(result.rows[0]?.total_cuadros || '0'),
+      year: currentYear,
+    };
+  }
+
+  /**
+   * Gráfica acumulativa de poliestireno por semana (año actual).
+   */
+  static async getPoliestirenoWeeklyChart() {
+    const currentYear = new Date().getFullYear();
+    const startOfYear = `${currentYear}-01-01`;
+
+    const query = `
+      SELECT
+        EXTRACT(WEEK FROM f8.date_value)::int as semana,
+        SUM(COALESCE(f16.numeric_value, 0) + COALESCE(f21.numeric_value, 0)) as unidades
+      FROM cards c
+      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
+      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
+      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
+      WHERE f8.date_value >= $1
+        AND f8.date_value <= CURRENT_DATE
+      GROUP BY EXTRACT(WEEK FROM f8.date_value)
+      ORDER BY semana
+    `;
+    const result = await pool.query(query, [startOfYear]);
+
+    const now = new Date();
+    const startOfYearDate = new Date(currentYear, 0, 1);
+    const diff = now.getTime() - startOfYearDate.getTime();
+    const currentWeek = Math.ceil((diff / (1000 * 60 * 60 * 24) + startOfYearDate.getDay() + 1) / 7);
+
+    const weekMap = new Map<number, number>();
+    result.rows.forEach(row => {
+      weekMap.set(row.semana, parseInt(row.unidades));
+    });
+
+    const labels: string[] = [];
+    const weekly: number[] = [];
+    const cumulative: number[] = [];
+    let runningTotal = 0;
+
+    for (let w = 1; w <= currentWeek; w++) {
+      labels.push(`S${w}`);
+      const weekValue = weekMap.get(w) || 0;
+      weekly.push(weekValue);
+      runningTotal += weekValue;
+      cumulative.push(runningTotal);
+    }
+
+    return { labels, weekly, cumulative, year: currentYear };
+  }
 }
 
 // ================================
@@ -128,7 +287,57 @@ export class DashboardController {
     }
   }
 
-  // Nuevos controllers irán aquí
+  static async getCartonKpi(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+      const data = await DashboardService.getCartonKpi();
+      return c.json(data, 200);
+    } catch (error: any) {
+      console.error('Error en DashboardController.getCartonKpi:', error);
+      return c.json({ error: 'No se pudo obtener el KPI de cartón' }, 500);
+    }
+  }
+
+  static async getCartonWeeklyChart(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) {
+        return c.json({ error: 'No autorizado' }, 401);
+      }
+      const data = await DashboardService.getCartonWeeklyChart();
+      return c.json(data, 200);
+    } catch (error: any) {
+      console.error('Error en DashboardController.getCartonWeeklyChart:', error);
+      return c.json({ error: 'No se pudo obtener la gráfica de cartón' }, 500);
+    }
+  }
+
+  static async getPoliestirenoKpi(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+      const data = await DashboardService.getPoliestirenoKpi();
+      return c.json(data, 200);
+    } catch (error: any) {
+      console.error('Error en DashboardController.getPoliestirenoKpi:', error);
+      return c.json({ error: 'No se pudo obtener el KPI de poliestireno' }, 500);
+    }
+  }
+
+  static async getPoliestirenoWeeklyChart(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+      const data = await DashboardService.getPoliestirenoWeeklyChart();
+      return c.json(data, 200);
+    } catch (error: any) {
+      console.error('Error en DashboardController.getPoliestirenoWeeklyChart:', error);
+      return c.json({ error: 'No se pudo obtener la gráfica de poliestireno' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -140,4 +349,8 @@ dashboardRoutes.use('*', keycloakAuthMiddleware);
 // Endpoint usado también por la página Home
 dashboardRoutes.get('/dashboard/charts/cuadros-cumulative', DashboardController.getCuadrosCumulative);
 
-// Nuevas rutas irán aquí
+// KPIs de Materias Primas
+dashboardRoutes.get('/dashboard/kpi/carton', DashboardController.getCartonKpi);
+dashboardRoutes.get('/dashboard/charts/carton-weekly', DashboardController.getCartonWeeklyChart);
+dashboardRoutes.get('/dashboard/kpi/poliestireno', DashboardController.getPoliestirenoKpi);
+dashboardRoutes.get('/dashboard/charts/poliestireno-weekly', DashboardController.getPoliestirenoWeeklyChart);
