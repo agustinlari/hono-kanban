@@ -106,164 +106,159 @@ export class DashboardService {
   }
 
   /**
-   * KPI Cartón: cuenta cartones consumidos por cuadros Prisma P salidos este año.
-   * - field_id=8: Fecha salida taller (filtra año actual)
-   * - field_id=15: Tipo armario (filtra text_value='Prisma P')
-   * - field_id=16: Nº paneles -> x2 cartones cada uno
-   * - field_id=21: Nº patinillos -> x2 cartones cada uno
+   * Materias Primas: datos completos (KPIs + gráficas) para el dashboard.
+   * Obtiene paneles por semana y tipo de envolvente, aplica factores de coste del CSV.
+   * Grandes = Prisma P, Prisma G, Spacial SF | Pequeños = Cofret plástico
    */
-  static async getCartonKpi() {
+  static async getMateriasPrimasData() {
     const currentYear = new Date().getFullYear();
     const startOfYear = `${currentYear}-01-01`;
 
-    const query = `
-      SELECT
-        COALESCE(SUM(COALESCE(f16.numeric_value, 0) * 2 + COALESCE(f21.numeric_value, 0) * 2), 0) as total_cartones,
-        COUNT(*) as total_cuadros
-      FROM cards c
-      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
-      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15 AND f15.text_value = 'Prisma P'
-      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
-      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
-      WHERE f8.date_value >= $1
-        AND f8.date_value <= CURRENT_DATE
-    `;
-    const result = await pool.query(query, [startOfYear]);
-
-    return {
-      totalCartones: parseInt(result.rows[0]?.total_cartones || '0'),
-      totalCuadros: parseInt(result.rows[0]?.total_cuadros || '0'),
-      year: currentYear,
+    // Factores por panel según tipo de envolvente (del CSV Costes material)
+    // Cada material tiene 3 dimensiones: importe (€), peso (Kg), superficie (m²)
+    interface MaterialFactors { importe: number; peso: number; superficie: number }
+    type EnvFactors = Record<string, MaterialFactors>;
+    const COST_FACTORS: Record<string, EnvFactors> = {
+      'Prisma P': {
+        palets:          { importe: 0.44,     peso: 22,    superficie: 0.87  },
+        poliestireno:    { importe: 0.12213,  peso: 0.69,  superficie: 0.35  },
+        carton:          { importe: 0.076465, peso: 1.865, superficie: 3.68  },
+        cintaPlastica:   { importe: 0.012213, peso: 0.069, superficie: 0.13  },
+        filmExtensible:  { importe: 0.023541, peso: 0.133, superficie: 5     },
+        cintaAdhesiva:   { importe: 0.013275, peso: 0.075, superficie: 0.48  },
+      },
+      'Prisma G': {
+        palets:          { importe: 0.44,     peso: 22,    superficie: 0.87  },
+        poliestireno:    { importe: 0.12213,  peso: 0.69,  superficie: 0.35  },
+        carton:          { importe: 0,        peso: 0,     superficie: 0     },
+        cintaPlastica:   { importe: 0.012213, peso: 0.069, superficie: 0.13  },
+        filmExtensible:  { importe: 0.023541, peso: 0.133, superficie: 5     },
+        cintaAdhesiva:   { importe: 0.013275, peso: 0.075, superficie: 0.48  },
+      },
+      'Spacial SF': {
+        palets:          { importe: 0.44,     peso: 22,    superficie: 0.87  },
+        poliestireno:    { importe: 0.12213,  peso: 0.69,  superficie: 0.35  },
+        carton:          { importe: 0.076465, peso: 1.865, superficie: 3.68  },
+        cintaPlastica:   { importe: 0.012213, peso: 0.069, superficie: 0.13  },
+        filmExtensible:  { importe: 0.023541, peso: 0.133, superficie: 5     },
+        cintaAdhesiva:   { importe: 0.013275, peso: 0.075, superficie: 0.48  },
+      },
+      'Cofret plástico': {
+        palets:          { importe: 0.44,     peso: 13.2,  superficie: 0.522 },
+        poliestireno:    { importe: 0.12213,  peso: 0.414, superficie: 0.21  },
+        carton:          { importe: 0,        peso: 0,     superficie: 0     },
+        cintaPlastica:   { importe: 0.012213, peso: 0.0414,superficie: 0.078 },
+        filmExtensible:  { importe: 0.023541, peso: 0.0798,superficie: 3     },
+        cintaAdhesiva:   { importe: 0.013275, peso: 0.045, superficie: 0.288 },
+      },
     };
-  }
+    const GRANDES = ['Prisma P', 'Prisma G', 'Spacial SF'];
 
-  /**
-   * Gráfica acumulativa de cartón por semana (Prisma P, año actual).
-   * Devuelve todas las semanas del año (S1..S52) con el acumulado hasta cada una.
-   */
-  static async getCartonWeeklyChart() {
-    const currentYear = new Date().getFullYear();
-    const startOfYear = `${currentYear}-01-01`;
-
+    // Query: paneles por semana y tipo envolvente
     const query = `
       SELECT
         EXTRACT(WEEK FROM f8.date_value)::int as semana,
-        SUM(COALESCE(f16.numeric_value, 0) * 2 + COALESCE(f21.numeric_value, 0) * 2) as cartones
+        f15.text_value as envolvente,
+        SUM(COALESCE(f16.numeric_value, 0)) as paneles,
+        COUNT(DISTINCT c.id) as cuadros
       FROM cards c
       INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
-      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15 AND f15.text_value = 'Prisma P'
+      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15
       LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
-      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
       WHERE f8.date_value >= $1
         AND f8.date_value <= CURRENT_DATE
-      GROUP BY EXTRACT(WEEK FROM f8.date_value)
+        AND f15.text_value IN ('Prisma P', 'Prisma G', 'Spacial SF', 'Cofret plástico')
+      GROUP BY semana, envolvente
       ORDER BY semana
     `;
     const result = await pool.query(query, [startOfYear]);
 
-    // Semana actual del año
+    // Semana actual
     const now = new Date();
     const startOfYearDate = new Date(currentYear, 0, 1);
     const diff = now.getTime() - startOfYearDate.getTime();
     const currentWeek = Math.ceil((diff / (1000 * 60 * 60 * 24) + startOfYearDate.getDay() + 1) / 7);
 
-    // Mapa de datos por semana
-    const weekMap = new Map<number, number>();
-    result.rows.forEach(row => {
-      weekMap.set(row.semana, parseInt(row.cartones));
-    });
+    // Acumular totales
+    let totalPanelesGrandes = 0;
+    let totalPanelesPequenos = 0;
+    let cuadrosGrandes = 0;
+    let cuadrosPequenos = 0;
+    const MATERIALS = ['palets', 'poliestireno', 'carton', 'cintaPlastica', 'filmExtensible', 'cintaAdhesiva'] as const;
+    const kpis = { palets: 0, poliestireno: 0, carton: 0, cintaPlastica: 0, filmExtensible: 0, cintaAdhesiva: 0 };
+    const kpisPeso = { palets: 0, poliestireno: 0, carton: 0, cintaPlastica: 0, filmExtensible: 0, cintaAdhesiva: 0 };
+    const kpisSuperficie = { palets: 0, poliestireno: 0, carton: 0, cintaPlastica: 0, filmExtensible: 0, cintaAdhesiva: 0 };
 
-    // Generar todas las semanas desde S1 hasta la semana actual
-    const labels: string[] = [];
-    const weekly: number[] = [];
-    const cumulative: number[] = [];
-    let runningTotal = 0;
+    // Mapas semanales para gráficas
+    const weekGrandes = new Map<number, number>();
+    const weekPequenos = new Map<number, number>();
 
-    for (let w = 1; w <= currentWeek; w++) {
-      labels.push(`S${w}`);
-      const weekValue = weekMap.get(w) || 0;
-      weekly.push(weekValue);
-      runningTotal += weekValue;
-      cumulative.push(runningTotal);
+    for (const row of result.rows) {
+      const env = row.envolvente as string;
+      const paneles = parseFloat(row.paneles) || 0;
+      const cuadros = parseInt(row.cuadros) || 0;
+      const semana = row.semana as number;
+      const factors = COST_FACTORS[env];
+      if (!factors) continue;
+
+      const isGrande = GRANDES.includes(env);
+      if (isGrande) {
+        totalPanelesGrandes += paneles;
+        cuadrosGrandes += cuadros;
+        weekGrandes.set(semana, (weekGrandes.get(semana) || 0) + paneles);
+      } else {
+        totalPanelesPequenos += paneles;
+        cuadrosPequenos += cuadros;
+        weekPequenos.set(semana, (weekPequenos.get(semana) || 0) + paneles);
+      }
+
+      // Acumular las 3 dimensiones por material
+      for (const mat of MATERIALS) {
+        const f = factors[mat];
+        if (!f) continue;
+        kpis[mat] += paneles * f.importe;
+        kpisPeso[mat] += paneles * f.peso;
+        kpisSuperficie[mat] += paneles * f.superficie;
+      }
     }
 
-    return { labels, weekly, cumulative, year: currentYear };
-  }
+    // Construir arrays semanales acumulativos
+    function buildWeeklyChart(weekMap: Map<number, number>) {
+      const labels: string[] = [];
+      const weekly: number[] = [];
+      const cumulative: number[] = [];
+      let runningTotal = 0;
+      for (let w = 1; w <= currentWeek; w++) {
+        labels.push(`S${w}`);
+        const val = weekMap.get(w) || 0;
+        weekly.push(val);
+        runningTotal += val;
+        cumulative.push(runningTotal);
+      }
+      return { labels, weekly, cumulative };
+    }
 
-  /**
-   * KPI Poliestireno: 1 unidad por panel + 1 por patinillo (todos los tipos de envolvente).
-   * Filtra por field_id=8 (fecha salida taller) en el año actual.
-   */
-  static async getPoliestirenoKpi() {
-    const currentYear = new Date().getFullYear();
-    const startOfYear = `${currentYear}-01-01`;
-
-    const query = `
-      SELECT
-        COALESCE(SUM(COALESCE(f16.numeric_value, 0) + COALESCE(f21.numeric_value, 0)), 0) as total_poliestireno,
-        COUNT(*) as total_cuadros
-      FROM cards c
-      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
-      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
-      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
-      WHERE f8.date_value >= $1
-        AND f8.date_value <= CURRENT_DATE
-    `;
-    const result = await pool.query(query, [startOfYear]);
+    // Redondear KPIs a 2 decimales
+    for (const mat of MATERIALS) {
+      kpis[mat] = Math.round(kpis[mat] * 100) / 100;
+      kpisPeso[mat] = Math.round(kpisPeso[mat] * 100) / 100;
+      kpisSuperficie[mat] = Math.round(kpisSuperficie[mat] * 100) / 100;
+    }
 
     return {
-      totalPoliestireno: parseInt(result.rows[0]?.total_poliestireno || '0'),
-      totalCuadros: parseInt(result.rows[0]?.total_cuadros || '0'),
+      paneles: {
+        grandes: totalPanelesGrandes,
+        pequenos: totalPanelesPequenos,
+        cuadrosGrandes,
+        cuadrosPequenos,
+      },
+      kpis,
+      kpisPeso,
+      kpisSuperficie,
+      chartGrandes: buildWeeklyChart(weekGrandes),
+      chartPequenos: buildWeeklyChart(weekPequenos),
       year: currentYear,
     };
-  }
-
-  /**
-   * Gráfica acumulativa de poliestireno por semana (año actual).
-   */
-  static async getPoliestirenoWeeklyChart() {
-    const currentYear = new Date().getFullYear();
-    const startOfYear = `${currentYear}-01-01`;
-
-    const query = `
-      SELECT
-        EXTRACT(WEEK FROM f8.date_value)::int as semana,
-        SUM(COALESCE(f16.numeric_value, 0) + COALESCE(f21.numeric_value, 0)) as unidades
-      FROM cards c
-      INNER JOIN card_custom_field_values f8 ON c.id = f8.card_id AND f8.field_id = 8
-      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
-      LEFT JOIN card_custom_field_values f21 ON c.id = f21.card_id AND f21.field_id = 21
-      WHERE f8.date_value >= $1
-        AND f8.date_value <= CURRENT_DATE
-      GROUP BY EXTRACT(WEEK FROM f8.date_value)
-      ORDER BY semana
-    `;
-    const result = await pool.query(query, [startOfYear]);
-
-    const now = new Date();
-    const startOfYearDate = new Date(currentYear, 0, 1);
-    const diff = now.getTime() - startOfYearDate.getTime();
-    const currentWeek = Math.ceil((diff / (1000 * 60 * 60 * 24) + startOfYearDate.getDay() + 1) / 7);
-
-    const weekMap = new Map<number, number>();
-    result.rows.forEach(row => {
-      weekMap.set(row.semana, parseInt(row.unidades));
-    });
-
-    const labels: string[] = [];
-    const weekly: number[] = [];
-    const cumulative: number[] = [];
-    let runningTotal = 0;
-
-    for (let w = 1; w <= currentWeek; w++) {
-      labels.push(`S${w}`);
-      const weekValue = weekMap.get(w) || 0;
-      weekly.push(weekValue);
-      runningTotal += weekValue;
-      cumulative.push(runningTotal);
-    }
-
-    return { labels, weekly, cumulative, year: currentYear };
   }
 }
 
@@ -287,55 +282,15 @@ export class DashboardController {
     }
   }
 
-  static async getCartonKpi(c: Context) {
-    try {
-      const user = c.get('user');
-      if (!user) {
-        return c.json({ error: 'No autorizado' }, 401);
-      }
-      const data = await DashboardService.getCartonKpi();
-      return c.json(data, 200);
-    } catch (error: any) {
-      console.error('Error en DashboardController.getCartonKpi:', error);
-      return c.json({ error: 'No se pudo obtener el KPI de cartón' }, 500);
-    }
-  }
-
-  static async getCartonWeeklyChart(c: Context) {
-    try {
-      const user = c.get('user');
-      if (!user) {
-        return c.json({ error: 'No autorizado' }, 401);
-      }
-      const data = await DashboardService.getCartonWeeklyChart();
-      return c.json(data, 200);
-    } catch (error: any) {
-      console.error('Error en DashboardController.getCartonWeeklyChart:', error);
-      return c.json({ error: 'No se pudo obtener la gráfica de cartón' }, 500);
-    }
-  }
-
-  static async getPoliestirenoKpi(c: Context) {
+  static async getMateriasPrimas(c: Context) {
     try {
       const user = c.get('user');
       if (!user) return c.json({ error: 'No autorizado' }, 401);
-      const data = await DashboardService.getPoliestirenoKpi();
+      const data = await DashboardService.getMateriasPrimasData();
       return c.json(data, 200);
     } catch (error: any) {
-      console.error('Error en DashboardController.getPoliestirenoKpi:', error);
-      return c.json({ error: 'No se pudo obtener el KPI de poliestireno' }, 500);
-    }
-  }
-
-  static async getPoliestirenoWeeklyChart(c: Context) {
-    try {
-      const user = c.get('user');
-      if (!user) return c.json({ error: 'No autorizado' }, 401);
-      const data = await DashboardService.getPoliestirenoWeeklyChart();
-      return c.json(data, 200);
-    } catch (error: any) {
-      console.error('Error en DashboardController.getPoliestirenoWeeklyChart:', error);
-      return c.json({ error: 'No se pudo obtener la gráfica de poliestireno' }, 500);
+      console.error('Error en DashboardController.getMateriasPrimas:', error);
+      return c.json({ error: 'No se pudieron obtener los datos de materias primas' }, 500);
     }
   }
 }
@@ -349,8 +304,5 @@ dashboardRoutes.use('*', keycloakAuthMiddleware);
 // Endpoint usado también por la página Home
 dashboardRoutes.get('/dashboard/charts/cuadros-cumulative', DashboardController.getCuadrosCumulative);
 
-// KPIs de Materias Primas
-dashboardRoutes.get('/dashboard/kpi/carton', DashboardController.getCartonKpi);
-dashboardRoutes.get('/dashboard/charts/carton-weekly', DashboardController.getCartonWeeklyChart);
-dashboardRoutes.get('/dashboard/kpi/poliestireno', DashboardController.getPoliestirenoKpi);
-dashboardRoutes.get('/dashboard/charts/poliestireno-weekly', DashboardController.getPoliestirenoWeeklyChart);
+// Materias Primas (KPIs + gráficas en un solo endpoint)
+dashboardRoutes.get('/dashboard/materias-primas', DashboardController.getMateriasPrimas);
