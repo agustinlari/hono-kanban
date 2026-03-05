@@ -33,6 +33,13 @@ interface ProyectoERP {
   nombre: string;      // -> descripcion
 }
 
+interface PedidoERP {
+  numobr: string;      // -> numero_obra_osmos (para buscar id_proyecto)
+  numped: string;      // -> numero_pedido
+  fisnom: string;      // -> nombre_proveedor
+  fecped: string;      // -> fecha_pedido
+}
+
 // ================================
 // Servicio de Sincronización
 // ================================
@@ -220,6 +227,63 @@ class SyncService {
         this.pendingRequest = null;
       }
 
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Procesa los pedidos recibidos del agente y hace UPSERT en la BD
+   */
+  static async processPedidosData(pedidos: PedidoERP[]): Promise<{ inserted: number; updated: number }> {
+    let inserted = 0;
+    let updated = 0;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const p of pedidos) {
+        // Buscar id_proyecto por numero_obra_osmos
+        const proyecto = await client.query(
+          'SELECT id FROM proyectos WHERE numero_obra_osmos = $1',
+          [p.numobr]
+        );
+        const idProyecto = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
+
+        // Verificar si existe el pedido por numero_pedido
+        const existing = await client.query(
+          'SELECT id FROM pedidos WHERE numero_pedido = $1',
+          [p.numped]
+        );
+
+        if (existing.rowCount && existing.rowCount > 0) {
+          // UPDATE (solo campos del ERP, no tocar is_collected ni notas)
+          await client.query(`
+            UPDATE pedidos SET
+              id_proyecto = $1,
+              nombre_proveedor = $2,
+              fecha_pedido = $3
+            WHERE numero_pedido = $4
+          `, [idProyecto, p.fisnom || null, p.fecped || null, p.numped]);
+          updated++;
+        } else {
+          // INSERT
+          await client.query(`
+            INSERT INTO pedidos (numero_pedido, id_proyecto, nombre_proveedor, fecha_pedido)
+            VALUES ($1, $2, $3, $4)
+          `, [p.numped, idProyecto, p.fisnom || null, p.fecped || null]);
+          inserted++;
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log(`✅ Pedidos sincronizados: ${inserted} insertados, ${updated} actualizados`);
+      return { inserted, updated };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Error sincronizando pedidos:', error);
       throw error;
     } finally {
       client.release();
@@ -428,6 +492,147 @@ syncRoutes.post('/sync/projects', async (c: Context) => {
       error: 'Error procesando proyectos',
       details: error.message
     }, 500);
+  }
+});
+
+/**
+ * Endpoint para que el agente envíe los datos de pedidos
+ * Autenticación por API key
+ */
+syncRoutes.post('/sync/pedidos', async (c: Context) => {
+  const apiKey = c.req.header('X-API-Key') || c.req.query('api_key');
+
+  if (apiKey !== SYNC_API_KEY) {
+    return c.json({ error: 'API key inválida' }, 401);
+  }
+
+  try {
+    const body = await c.req.json();
+    const pedidos: PedidoERP[] = body.pedidos;
+
+    if (!Array.isArray(pedidos)) {
+      return c.json({ error: 'Se esperaba un array de pedidos' }, 400);
+    }
+
+    console.log(`📥 Recibidos ${pedidos.length} pedidos del agente`);
+
+    const result = await SyncService.processPedidosData(pedidos);
+
+    return c.json({
+      success: true,
+      inserted: result.inserted,
+      updated: result.updated,
+      total: result.inserted + result.updated
+    });
+  } catch (error: any) {
+    console.error('Error procesando pedidos:', error);
+    return c.json({
+      error: 'Error procesando pedidos',
+      details: error.message
+    }, 500);
+  }
+});
+
+/**
+ * Endpoint para obtener todos los pedidos con información del proyecto
+ * Requiere autenticación JWT
+ */
+syncRoutes.get('/pedidos', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        p.id,
+        p.numero_pedido,
+        p.id_proyecto,
+        p.nombre_proveedor,
+        p.fecha_pedido,
+        p.is_collected,
+        p.notas,
+        p.created_at,
+        pr.numero_obra_osmos,
+        pr.ciudad,
+        pr.mercado,
+        pr.inmueble,
+        pr.latitud,
+        pr.longitud
+      FROM pedidos p
+      LEFT JOIN proyectos pr ON p.id_proyecto = pr.id
+      ORDER BY p.fecha_pedido DESC
+    `);
+
+    return c.json(result.rows);
+  } catch (error: any) {
+    console.error('Error obteniendo pedidos:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+/**
+ * Endpoint para actualizar un pedido (is_collected, notas)
+ * Requiere autenticación JWT
+ */
+syncRoutes.put('/pedidos/:id', keycloakAuthMiddleware, async (c: Context) => {
+  const id = c.req.param('id');
+  try {
+    const body = await c.req.json();
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (body.is_collected !== undefined) {
+      fields.push(`is_collected = $${paramIndex++}`);
+      values.push(body.is_collected);
+    }
+    if (body.notas !== undefined) {
+      fields.push(`notas = $${paramIndex++}`);
+      values.push(body.notas);
+    }
+
+    if (fields.length === 0) {
+      return c.json({ error: 'No hay campos para actualizar' }, 400);
+    }
+
+    values.push(id);
+    const result = await pool.query(
+      `UPDATE pedidos SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    if (result.rowCount === 0) {
+      return c.json({ error: 'Pedido no encontrado' }, 404);
+    }
+
+    return c.json(result.rows[0]);
+  } catch (error: any) {
+    console.error('Error actualizando pedido:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+/**
+ * Endpoint para vincular un pedido a la tarjeta actual (logística)
+ * Crea una entrada en cards_packages vinculando el pedido
+ */
+syncRoutes.post('/pedidos/:id/link-card', keycloakAuthMiddleware, async (c: Context) => {
+  const pedidoId = c.req.param('id');
+  try {
+    const body = await c.req.json();
+    const { card_id } = body;
+
+    if (!card_id) {
+      return c.json({ error: 'card_id es requerido' }, 400);
+    }
+
+    // Marcar el pedido como vinculado a logística
+    await pool.query(
+      'UPDATE pedidos SET is_collected = true WHERE id = $1',
+      [pedidoId]
+    );
+
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error('Error vinculando pedido:', error);
+    return c.json({ error: error.message }, 500);
   }
 });
 
