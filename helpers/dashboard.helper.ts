@@ -260,6 +260,35 @@ export class DashboardService {
       year: currentYear,
     };
   }
+  /**
+   * Devuelve la lista de tarjetas que tienen envolvente + paneles,
+   * con título, proyecto, tipo de envolvente y cantidad de paneles.
+   * Se usa para el buscador de costes individuales en SCRAP.
+   */
+  static async getCardsWithCosts() {
+    const query = `
+      SELECT
+        c.id,
+        c.title,
+        p.nombre_proyecto as proyecto,
+        f15.text_value as envolvente,
+        COALESCE(f16.numeric_value, 0) as paneles
+      FROM cards c
+      INNER JOIN card_custom_field_values f15 ON c.id = f15.card_id AND f15.field_id = 15
+      LEFT JOIN card_custom_field_values f16 ON c.id = f16.card_id AND f16.field_id = 16
+      LEFT JOIN proyectos p ON c.proyecto_id = p.id
+      WHERE f15.text_value IN ('Prisma P', 'Prisma G', 'Spacial SF', 'Cofret plástico')
+      ORDER BY c.title ASC
+    `;
+    const result = await pool.query(query);
+    return result.rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      proyecto: row.proyecto || null,
+      envolvente: row.envolvente,
+      paneles: parseFloat(row.paneles) || 0,
+    }));
+  }
 }
 
 // ================================
@@ -293,6 +322,18 @@ export class DashboardController {
       return c.json({ error: 'No se pudieron obtener los datos de materias primas' }, 500);
     }
   }
+
+  static async getCardsWithCosts(c: Context) {
+    try {
+      const user = c.get('user');
+      if (!user) return c.json({ error: 'No autorizado' }, 401);
+      const data = await DashboardService.getCardsWithCosts();
+      return c.json(data, 200);
+    } catch (error: any) {
+      console.error('Error en DashboardController.getCardsWithCosts:', error);
+      return c.json({ error: 'No se pudieron obtener las tarjetas con costes' }, 500);
+    }
+  }
 }
 
 // ================================
@@ -306,3 +347,6 @@ dashboardRoutes.get('/dashboard/charts/cuadros-cumulative', DashboardController.
 
 // Materias Primas (KPIs + gráficas en un solo endpoint)
 dashboardRoutes.get('/dashboard/materias-primas', DashboardController.getMateriasPrimas);
+
+// Tarjetas con costes (para buscador SCRAP)
+dashboardRoutes.get('/dashboard/cards-with-costs', DashboardController.getCardsWithCosts);
