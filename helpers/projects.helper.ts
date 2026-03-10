@@ -25,7 +25,8 @@ class ProjectsService {
           responsable_tecnico_id, responsable_delineacion_id, centro_coste, notas_internas,
           fecha_asignacion_responsable, cod_integracion, mercado, cadena, codigo, inmueble,
           sup_alq, bt_solicitud, inicio_obra_prevista, inicio_obra_real, apert_espacio_prevista,
-          presupuesto, fecha_inicio_planificada, fecha_fin_estimada, es_bim, numero_obra_osmos
+          presupuesto, fecha_inicio_planificada, fecha_fin_estimada, es_bim, numero_obra_osmos,
+          latitud, longitud, coordinates_user_override
         FROM proyectos
         ORDER BY codigo ASC, cod_integracion ASC
       `;
@@ -50,7 +51,8 @@ class ProjectsService {
           nombre_proyecto, activo, inmueble, sup_alq, bt_solicitud,
           inicio_obra_prevista, inicio_obra_real, apert_espacio_prevista,
           descripcion, es_bim, numero_obra_osmos,
-          creado_manualmente, fecha_cambio
+          creado_manualmente, fecha_cambio,
+          latitud, longitud, coordinates_user_override
         FROM proyectos
         WHERE id = $1
       `;
@@ -194,8 +196,9 @@ class ProjectsService {
           bt_solicitud = $10, inicio_obra_prevista = $11, inicio_obra_real = $12,
           apert_espacio_prevista = $13, descripcion = $14, es_bim = $15,
           numero_obra_osmos = $16,
+          latitud = $17, longitud = $18, coordinates_user_override = $19,
           fecha_cambio = CURRENT_TIMESTAMP
-        WHERE id = $17
+        WHERE id = $20
         RETURNING *
       `;
 
@@ -216,6 +219,9 @@ class ProjectsService {
         projectData.descripcion !== undefined ? projectData.descripcion : oldProject.descripcion,
         projectData.es_bim !== undefined ? projectData.es_bim : oldProject.es_bim,
         projectData.numero_obra_osmos !== undefined ? projectData.numero_obra_osmos : oldProject.numero_obra_osmos,
+        projectData.latitud !== undefined ? projectData.latitud : oldProject.latitud,
+        projectData.longitud !== undefined ? projectData.longitud : oldProject.longitud,
+        projectData.coordinates_user_override !== undefined ? projectData.coordinates_user_override : oldProject.coordinates_user_override,
         id
       ];
 
@@ -228,7 +234,8 @@ class ProjectsService {
         'mercado', 'ciudad', 'cadena', 'codigo', 'cod_integracion',
         'nombre_proyecto', 'activo', 'inmueble', 'sup_alq', 'bt_solicitud',
         'inicio_obra_prevista', 'inicio_obra_real', 'apert_espacio_prevista',
-        'descripcion', 'es_bim', 'numero_obra_osmos'
+        'descripcion', 'es_bim', 'numero_obra_osmos',
+        'latitud', 'longitud', 'coordinates_user_override'
       ];
 
       for (const field of fieldsToCheck) {

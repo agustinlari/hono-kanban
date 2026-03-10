@@ -153,28 +153,60 @@ class SyncService {
         );
 
         if (existing.rowCount && existing.rowCount > 0) {
-          // UPDATE
-          await client.query(`
-            UPDATE proyectos SET
-              nombre_proyecto = $1,
-              cadena = $2,
-              mercado = $3,
-              ciudad = $4,
-              inmueble = $5,
-              codigo_postal = $6,
-              descripcion = $7,
-              fecha_cambio = NOW()
-            WHERE numero_obra_osmos = $8
-          `, [
-            p.fpacod || null,
-            p.inscli || null,
-            p.envpai || null,
-            p.envpob || null,
-            p.envdir || null,
-            p.envcpo || null,
-            p.nombre || null,
-            p.numobr
-          ]);
+          // Check if coordinates are user-overridden
+          const overrideCheck = await client.query(
+            'SELECT coordinates_user_override FROM proyectos WHERE numero_obra_osmos = $1',
+            [p.numobr]
+          );
+          const hasOverride = overrideCheck.rows[0]?.coordinates_user_override === true;
+
+          if (hasOverride) {
+            // UPDATE without touching coordinates - user has overridden them
+            await client.query(`
+              UPDATE proyectos SET
+                nombre_proyecto = $1,
+                cadena = $2,
+                mercado = $3,
+                ciudad = $4,
+                inmueble = $5,
+                codigo_postal = $6,
+                descripcion = $7,
+                fecha_cambio = NOW()
+              WHERE numero_obra_osmos = $8
+            `, [
+              p.fpacod || null,
+              p.inscli || null,
+              p.envpai || null,
+              p.envpob || null,
+              p.envdir || null,
+              p.envcpo || null,
+              p.nombre || null,
+              p.numobr
+            ]);
+          } else {
+            // UPDATE normally (geocoding will run after and set coordinates)
+            await client.query(`
+              UPDATE proyectos SET
+                nombre_proyecto = $1,
+                cadena = $2,
+                mercado = $3,
+                ciudad = $4,
+                inmueble = $5,
+                codigo_postal = $6,
+                descripcion = $7,
+                fecha_cambio = NOW()
+              WHERE numero_obra_osmos = $8
+            `, [
+              p.fpacod || null,
+              p.inscli || null,
+              p.envpai || null,
+              p.envpob || null,
+              p.envdir || null,
+              p.envcpo || null,
+              p.nombre || null,
+              p.numobr
+            ]);
+          }
           updated++;
         } else {
           // INSERT
@@ -331,6 +363,7 @@ async function geocodeProjectsWithoutCoordinates(): Promise<void> {
     SELECT id, ciudad, inmueble, codigo_postal, mercado
     FROM proyectos
     WHERE latitud IS NULL
+      AND coordinates_user_override = false
       AND (ciudad IS NOT NULL OR inmueble IS NOT NULL OR codigo_postal IS NOT NULL)
   `);
 
