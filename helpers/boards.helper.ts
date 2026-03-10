@@ -45,6 +45,7 @@ class BoardService {
         p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
         p.numero_obra_osmos as proyecto_numero_obra_osmos, p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
         p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim,
+        p.latitud as proyecto_latitud, p.longitud as proyecto_longitud,
         pet.form_data
       FROM lists l
       LEFT JOIN cards c ON c.list_id = l.id
@@ -282,7 +283,9 @@ class BoardService {
             numero_obra_osmos: row.proyecto_numero_obra_osmos,
             inicio_obra_prevista: row.proyecto_inicio_obra_prevista,
             apert_espacio_prevista: row.proyecto_apert_espacio_prevista,
-            es_bim: row.proyecto_es_bim
+            es_bim: row.proyecto_es_bim,
+            latitud: row.proyecto_latitud,
+            longitud: row.proyecto_longitud
           };
         }
 
