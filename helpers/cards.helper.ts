@@ -1309,8 +1309,8 @@ class CardService {
           c.title ILIKE $${paramIndex} OR
           c.description ILIKE $${paramIndex} OR
           p.nombre_proyecto ILIKE $${paramIndex} OR
-          p.codigo ILIKE $${paramIndex} OR
-          p.cod_integracion ILIKE $${paramIndex} OR
+          p.codigo::text ILIKE $${paramIndex} OR
+          p.cod_integracion::text ILIKE $${paramIndex} OR
           p.cadena ILIKE $${paramIndex} OR
           p.mercado ILIKE $${paramIndex} OR
           p.ciudad ILIKE $${paramIndex} OR
