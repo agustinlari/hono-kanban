@@ -35,9 +35,11 @@ interface ProyectoERP {
 
 interface PedidoERP {
   numobr: string;      // -> numero_obra_osmos (para buscar id_proyecto)
-  numped: string;      // -> numero_pedido
-  fisnom: string;      // -> nombre_proveedor
-  fecped: string;      // -> fecha_pedido
+  numped: string;      // -> numero_pedido (título de la tarjeta)
+  fisnom: string;      // -> nombre_proveedor (descripción de la tarjeta)
+  fecped: string;      // -> fecha_pedido (start_date de la tarjeta)
+  situac: string;      // B=borrador, E=enviado, P=parcial, R=recibido, C=cancelado -> lista
+  estado: string;      // A=abierto (progress=0), C=cerrado (progress=100)
 }
 
 // ================================
@@ -265,8 +267,19 @@ class SyncService {
     }
   }
 
+  // Mapeo de situación ERP -> list_id en board "Pedidos" (id=61)
+  private static readonly SITUAC_TO_LIST: Record<string, number> = {
+    'E': 112,  // Enviado
+    'P': 113,  // Parcial
+    'R': 114,  // Recibido
+    'B': 115,  // Borrador y Cancelados
+    'C': 115,  // Borrador y Cancelados
+  };
+
+  private static readonly PEDIDOS_BOARD_ID = 61;
+
   /**
-   * Procesa los pedidos recibidos del agente y hace UPSERT en la BD
+   * Procesa los pedidos recibidos del agente y crea/actualiza tarjetas en el tablero "Pedidos"
    */
   static async processPedidosData(pedidos: PedidoERP[]): Promise<{ inserted: number; updated: number }> {
     let inserted = 0;
@@ -276,46 +289,91 @@ class SyncService {
     try {
       await client.query('BEGIN');
 
+      // Cargar todas las tarjetas existentes del board Pedidos de una vez (por título = numped)
+      const existingCards = await client.query(
+        `SELECT c.id, c.title, c.list_id, c.progress
+         FROM cards c
+         JOIN lists l ON c.list_id = l.id
+         WHERE l.board_id = $1`,
+        [this.PEDIDOS_BOARD_ID]
+      );
+      const cardMap = new Map<string, { id: string; list_id: number; progress: number }>();
+      for (const row of existingCards.rows) {
+        cardMap.set(row.title, { id: row.id, list_id: row.list_id, progress: row.progress });
+      }
+
       for (const p of pedidos) {
-        // Buscar id_proyecto por numero_obra_osmos
+        const situac = (p.situac || '').trim().toUpperCase();
+        const estado = (p.estado || '').trim().toUpperCase();
+
+        // Determinar list_id según situación
+        const targetListId = this.SITUAC_TO_LIST[situac];
+        if (!targetListId) {
+          console.log(`⚠️ Pedido ${p.numped}: situación desconocida '${situac}', ignorando`);
+          continue;
+        }
+
+        // Determinar progress según estado
+        const progress = estado === 'C' ? 100 : 0;
+
+        // Buscar proyecto vinculado
         const proyecto = await client.query(
           'SELECT id FROM proyectos WHERE numero_obra_osmos = $1',
           [p.numobr]
         );
-        const idProyecto = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
+        const proyectoId = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
 
-        // Verificar si existe el pedido por numero_pedido
-        const existing = await client.query(
-          'SELECT id FROM pedidos WHERE numero_pedido = $1',
-          [p.numped]
-        );
+        const existingCard = cardMap.get(p.numped);
 
-        if (existing.rowCount && existing.rowCount > 0) {
-          // UPDATE (solo campos del ERP, no tocar is_collected ni notas)
+        if (existingCard) {
+          // UPDATE: actualizar list_id, progress, description, start_date, proyecto_id
           await client.query(`
-            UPDATE pedidos SET
-              id_proyecto = $1,
-              nombre_proveedor = $2,
-              fecha_pedido = $3
-            WHERE numero_pedido = $4
-          `, [idProyecto, p.fisnom || null, p.fecped || null, p.numped]);
+            UPDATE cards SET
+              list_id = $1,
+              progress = $2,
+              description = $3,
+              start_date = $4,
+              proyecto_id = $5
+            WHERE id = $6
+          `, [
+            targetListId,
+            progress,
+            p.fisnom || null,
+            p.fecped || null,
+            proyectoId,
+            existingCard.id
+          ]);
           updated++;
         } else {
-          // INSERT
+          // INSERT: nueva tarjeta al final de la lista
+          const posResult = await client.query(
+            'SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM cards WHERE list_id = $1',
+            [targetListId]
+          );
+          const nextPos = posResult.rows[0].next_pos;
+
           await client.query(`
-            INSERT INTO pedidos (numero_pedido, id_proyecto, nombre_proveedor, fecha_pedido)
-            VALUES ($1, $2, $3, $4)
-          `, [p.numped, idProyecto, p.fisnom || null, p.fecped || null]);
+            INSERT INTO cards (title, description, position, list_id, start_date, proyecto_id, progress)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `, [
+            p.numped,
+            p.fisnom || null,
+            nextPos,
+            targetListId,
+            p.fecped || null,
+            proyectoId,
+            progress
+          ]);
           inserted++;
         }
       }
 
       await client.query('COMMIT');
-      console.log(`✅ Pedidos sincronizados: ${inserted} insertados, ${updated} actualizados`);
+      console.log(`✅ Pedidos sincronizados en tablero: ${inserted} tarjetas creadas, ${updated} actualizadas`);
       return { inserted, updated };
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('❌ Error sincronizando pedidos:', error);
+      console.error('❌ Error sincronizando pedidos en tablero:', error);
       throw error;
     } finally {
       client.release();
