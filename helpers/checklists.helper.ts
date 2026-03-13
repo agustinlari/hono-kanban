@@ -286,7 +286,7 @@ checklistsRoutes.use('*', keycloakAuthMiddleware);
  * GET /cards/:cardId/checklists
  * Obtiene todos los checklists de una tarjeta
  */
-checklistsRoutes.get('/cards/:cardId/checklists', requirePermission(PermissionAction.VIEW), async (c: Context<{ Variables: Variables }>) => {
+checklistsRoutes.get('/cards/:cardId/checklists', requirePermission(PermissionAction.VIEW_BOARD), async (c: Context<{ Variables: Variables }>) => {
   try {
     const user = c.get('user');
     if (!user) {
