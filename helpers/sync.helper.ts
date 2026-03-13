@@ -297,9 +297,11 @@ class SyncService {
          WHERE l.board_id = $1`,
         [this.PEDIDOS_BOARD_ID]
       );
+      // Indexar por los primeros 6 caracteres del título (numped)
       const cardMap = new Map<string, { id: string; list_id: number; progress: number }>();
       for (const row of existingCards.rows) {
-        cardMap.set(row.title, { id: row.id, list_id: row.list_id, progress: row.progress });
+        const numped = row.title.substring(0, 6);
+        cardMap.set(numped, { id: row.id, list_id: row.list_id, progress: row.progress });
       }
 
       for (const p of pedidos) {
@@ -323,22 +325,28 @@ class SyncService {
         );
         const proyectoId = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
 
+        // Construir título: "123456 · Proveedor S.L. · 2026-03-10"
+        const titleParts = [p.numped];
+        if (p.fisnom) titleParts.push(p.fisnom);
+        if (p.fecped) titleParts.push(p.fecped.substring(0, 10));
+        const title = titleParts.join(' · ');
+
         const existingCard = cardMap.get(p.numped);
 
         if (existingCard) {
-          // UPDATE: actualizar list_id, progress, description, start_date, proyecto_id
+          // UPDATE: actualizar título, list_id, progress, start_date, proyecto_id
           await client.query(`
             UPDATE cards SET
-              list_id = $1,
-              progress = $2,
-              description = $3,
+              title = $1,
+              list_id = $2,
+              progress = $3,
               start_date = $4,
               proyecto_id = $5
             WHERE id = $6
           `, [
+            title,
             targetListId,
             progress,
-            p.fisnom || null,
             p.fecped || null,
             proyectoId,
             existingCard.id
@@ -356,7 +364,7 @@ class SyncService {
             INSERT INTO cards (title, description, position, list_id, start_date, proyecto_id, progress)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
           `, [
-            p.numped,
+            title,
             p.fisnom || null,
             nextPos,
             targetListId,
