@@ -1,11 +1,12 @@
 // helpers/keycloak.helper.ts - Integración con Keycloak
 import jwt from 'jsonwebtoken';
 import jwksClient, { type JwksClient } from 'jwks-rsa';
-import { 
-  KEYCLOAK_BASE_URL, 
-  KEYCLOAK_REALM, 
+import {
+  KEYCLOAK_BASE_URL,
+  KEYCLOAK_REALM,
   KEYCLOAK_PUBLIC_KEY_URL,
   KEYCLOAK_ISSUER,
+  KEYCLOAK_INTERNAL_ISSUER,
   KEYCLOAK_CLIENT_ID
 } from '../config/env';
 
@@ -57,7 +58,7 @@ export async function validateKeycloakToken(token: string): Promise<KeycloakUser
   return new Promise((resolve, reject) => {
     jwt.verify(token, getKey, {
       audience: 'account', // Cliente por defecto en Keycloak
-      issuer: KEYCLOAK_ISSUER,
+      issuer: [KEYCLOAK_ISSUER, KEYCLOAK_INTERNAL_ISSUER],
       algorithms: ['RS256']
     }, (err, decoded) => {
       if (err) {
