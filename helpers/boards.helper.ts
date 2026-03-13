@@ -125,6 +125,37 @@ class BoardService {
     `;
     const packagesResult = await pool.query(packagesQuery, [id]);
 
+    // 5c. Si el tablero tiene show_checklist_items activo, cargar items individuales
+    const showChecklistItems = boardData.badge_settings?.show_checklist_items === true;
+    let cardChecklistItemsMap = new Map<string, any[]>();
+    if (showChecklistItems) {
+      const checklistItemsQuery = `
+        SELECT
+          cc.card_id,
+          ci.id as item_id,
+          ci.description,
+          ci.is_completed,
+          ci.position
+        FROM checklist_items ci
+        INNER JOIN card_checklists cc ON ci.checklist_id = cc.id
+        INNER JOIN cards c ON cc.card_id = c.id
+        INNER JOIN lists l ON c.list_id = l.id
+        WHERE l.board_id = $1
+        ORDER BY ci.is_completed ASC, ci.position ASC
+      `;
+      const checklistItemsResult = await pool.query(checklistItemsQuery, [id]);
+      for (const row of checklistItemsResult.rows) {
+        if (!cardChecklistItemsMap.has(row.card_id)) {
+          cardChecklistItemsMap.set(row.card_id, []);
+        }
+        cardChecklistItemsMap.get(row.card_id)!.push({
+          id: row.item_id,
+          description: row.description,
+          is_completed: row.is_completed
+        });
+      }
+    }
+
     // 6. Obtener todos los custom field values de las tarjetas del tablero
     const customFieldsQuery = `
       SELECT
@@ -264,7 +295,8 @@ class BoardService {
           checklist_items_completed: checklistStats.completed_items,
           packages_total: packageStats.packages_total,
           packages_collected: packageStats.packages_collected,
-          custom_field_values: cardCustomFieldsMap.get(row.card_id) || []
+          custom_field_values: cardCustomFieldsMap.get(row.card_id) || [],
+          checklist_items: showChecklistItems ? (cardChecklistItemsMap.get(row.card_id) || []) : undefined
         };
 
         // Agregar información del proyecto si existe
