@@ -78,7 +78,7 @@ routes.use('/wallpapers/*', serveStatic({
 // IMPORTANTE: SSE routes PRIMERO porque no usa middleware de auth estándar
 routes.route('/', sseRoutes);
 
-// Sync routes - también antes de auth porque el agente usa API key
+// Sync routes - sincronización directa con ERP
 routes.route('/', syncRoutes);
 
 // IMPORTANTE: keycloakAuthRoutes después para evitar conflictos de rutas

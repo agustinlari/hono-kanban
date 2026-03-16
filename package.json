@@ -21,6 +21,8 @@
     "hono": "^4.7.11",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.1.0",
+    "mssql": "^12.2.0",
+    "node-cron": "^4.2.1",
     "node-geocoder": "^4.4.1",
     "nodemailer": "^7.0.10",
     "papaparse": "^5.5.3",
@@ -31,6 +33,8 @@
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/mssql": "^9.1.9",
+    "@types/node-cron": "^3.0.11",
     "@types/papaparse": "^5.3.16",
     "@types/pg": "^8.15.4",
     "@types/uuid": "^10.0.0",

@@ -1,144 +1,178 @@
-// helpers/sync.helper.ts - Sincronización de proyectos desde ERP externo
+// helpers/sync.helper.ts - Sincronización directa de proyectos desde ERP (SQL Server)
 import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
+import sql from 'mssql';
+import cron from 'node-cron';
 import { pool } from '../config/database';
 import type { Variables } from '../types';
 import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import NodeGeocoder from 'node-geocoder';
 
 // ================================
-// Configuración
+// Configuración SQL Server (ERP)
 // ================================
-const SYNC_API_KEY = process.env.API_EXPORT_KEY || 'kE7pZ2nQ9xR4sWbV1yU8vA3mF6jH1gC4';
+const ERP_CONFIG: sql.config = {
+  server: 'SRVSQL',
+  database: 'OBRAOSM2026',
+  user: 'consultasOsmos',
+  password: 'yZ43mEsewFvu',
+  options: {
+    encrypt: false,
+    trustServerCertificate: true,
+  },
+  requestTimeout: 30000,
+  connectionTimeout: 10000,
+};
+
+// Mapeo de códigos fpacod a nombres descriptivos
+const FPACOD_MAP: Record<string, string> = {
+  'X060': 'Otros',
+  'CF60': 'Retail',
+  'C000': 'Cuadros',
+};
+
+function translateFpacod(code: string): string {
+  return FPACOD_MAP[code.trim()] || code;
+}
 
 // ================================
 // Tipos
 // ================================
-interface SyncAgent {
-  id: string;
-  controller: any;
-  connectedAt: number;
-  aborted: boolean;
-}
-
 interface ProyectoERP {
-  fpacod: string;      // -> nombre_proyecto
-  inscli: string;      // -> cadena
-  envpai: string;      // -> mercado
-  envpob: string;      // -> ciudad
-  envdir: string;      // -> inmueble
-  envcpo: string;      // -> codigo_postal
-  numobr: string;      // -> numero_obra_osmos (clave para UPSERT)
-  nombre: string;      // -> descripcion
+  fpacod: string;
+  inscli: string;
+  envpai: string;
+  envpob: string;
+  envdir: string;
+  envcpo: string;
+  numobr: string;
+  nombre: string;
 }
 
 interface PedidoERP {
-  numobr: string;      // -> numero_obra_osmos (para buscar id_proyecto)
-  numped: string;      // -> numero_pedido (título de la tarjeta)
-  fisnom: string;      // -> nombre_proveedor (descripción de la tarjeta)
-  fecped: string;      // -> fecha_pedido (start_date de la tarjeta)
-  situac: string;      // B=borrador, E=enviado, P=parcial, R=recibido, C=cancelado -> lista
-  estado: string;      // A=abierto (progress=0), C=cerrado (progress=100)
+  numobr: string;
+  numped: string;
+  fisnom: string;
+  fecped: string;
+  situac: string;
+  estado: string;
+}
+
+// ================================
+// Consultas al ERP
+// ================================
+async function fetchProyectosFromERP(): Promise<ProyectoERP[]> {
+  console.log('📡 Consultando proyectos en SQL Server...');
+  const connection = await sql.connect(ERP_CONFIG);
+  try {
+    const result = await connection.request().query(`
+      SELECT
+        obras.fpacod,
+        obras.inscli,
+        obras.envpai,
+        obras.envpob,
+        obras.envdir,
+        obras.envcpo,
+        obras.numobr,
+        obras.nombre
+      FROM obras
+      WHERE (obras.fpacod='X060' OR obras.fpacod='CF60' OR obras.fpacod='C000')
+        AND obras.numemp = 2
+    `);
+
+    const proyectos: ProyectoERP[] = result.recordset.map((row: any) => ({
+      fpacod: translateFpacod(String(row.fpacod || '').trim()),
+      inscli: String(row.inscli || '').trim(),
+      envpai: String(row.envpai || '').trim(),
+      envpob: String(row.envpob || '').trim(),
+      envdir: String(row.envdir || '').trim(),
+      envcpo: String(row.envcpo || '').trim(),
+      numobr: String(row.numobr || '').trim(),
+      nombre: String(row.nombre || '').trim(),
+    }));
+
+    console.log(`✅ Obtenidos ${proyectos.length} proyectos de SQL Server`);
+    return proyectos;
+  } finally {
+    await connection.close();
+  }
+}
+
+async function fetchPedidosFromERP(): Promise<PedidoERP[]> {
+  console.log('📡 Consultando pedidos en SQL Server...');
+  const connection = await sql.connect(ERP_CONFIG);
+  try {
+    const result = await connection.request().query(`
+      SELECT
+        pediprov.numobr,
+        pediprov.numped,
+        pediprov.fisnom,
+        pediprov.fecped,
+        pediprov.situac,
+        pediprov.estado
+      FROM pediprov
+      WHERE pediprov.numalm = 1
+        AND pediprov.numemp = 2
+        AND pediprov.fecped >= DATEADD(month, -2, GETDATE())
+    `);
+
+    const pedidos: PedidoERP[] = result.recordset.map((row: any) => ({
+      numobr: String(row.numobr || '').trim(),
+      numped: String(row.numped || '').trim(),
+      fisnom: String(row.fisnom || '').trim(),
+      fecped: row.fecped ? new Date(row.fecped).toISOString() : '',
+      situac: String(row.situac || '').trim(),
+      estado: String(row.estado || '').trim(),
+    }));
+
+    console.log(`✅ Obtenidos ${pedidos.length} pedidos de SQL Server`);
+    return pedidos;
+  } finally {
+    await connection.close();
+  }
 }
 
 // ================================
 // Servicio de Sincronización
 // ================================
 class SyncService {
-  private static agent: SyncAgent | null = null;
-  private static pendingRequest: {
-    resolve: (value: any) => void;
-    reject: (error: any) => void;
-    timeout: NodeJS.Timeout;
-  } | null = null;
+  private static syncing = false;
 
-  /**
-   * Registra el agente de sincronización
-   */
-  static registerAgent(controller: any): string {
-    // Si hay un agente anterior, marcarlo como abortado
-    if (this.agent && !this.agent.aborted) {
-      console.log('🔄 Cerrando agente de sincronización anterior');
-      this.agent.aborted = true;
-      try {
-        this.agent.controller.close?.();
-      } catch (e) {
-        // Ignorar errores al cerrar
-      }
-    }
-
-    const agentId = `sync-agent-${Date.now()}`;
-    this.agent = {
-      id: agentId,
-      controller,
-      connectedAt: Date.now(),
-      aborted: false
-    };
-
-    console.log(`✅ Agente de sincronización conectado: ${agentId}`);
-    return agentId;
-  }
-
-  /**
-   * Desregistra el agente de sincronización
-   */
-  static unregisterAgent(): void {
-    if (this.agent) {
-      console.log(`🔌 Agente de sincronización desconectado: ${this.agent.id}`);
-      this.agent.aborted = true;
-      this.agent = null;
-    }
-  }
-
-  /**
-   * Verifica si hay un agente conectado
-   */
-  static isAgentConnected(): boolean {
-    return this.agent !== null && !this.agent.aborted;
-  }
-
-  /**
-   * Envía solicitud de sincronización al agente
-   * Retorna una promesa que se resuelve cuando el agente responde
-   */
   static async requestSync(): Promise<{ success: boolean; message: string; count?: number }> {
-    if (!this.isAgentConnected()) {
+    if (this.syncing) {
+      return { success: false, message: 'Ya hay una sincronización en curso' };
+    }
+
+    this.syncing = true;
+    try {
+      // 1. Sincronizar proyectos
+      const proyectos = await fetchProyectosFromERP();
+      const projectResult = await this.processProjectsData(proyectos);
+
+      // 2. Sincronizar pedidos
+      const pedidos = await fetchPedidosFromERP();
+      const pedidosResult = await this.processPedidosData(pedidos);
+
+      const message = `Proyectos: ${projectResult.inserted} nuevos, ${projectResult.updated} actualizados. ` +
+        `Pedidos: ${pedidosResult.inserted} nuevos, ${pedidosResult.updated} actualizados.`;
+
+      console.log(`✅ Sincronización completa: ${message}`);
+      return {
+        success: true,
+        message,
+        count: projectResult.inserted + projectResult.updated + pedidosResult.inserted + pedidosResult.updated
+      };
+    } catch (error: any) {
+      console.error('❌ Error en sincronización:', error);
       return {
         success: false,
-        message: 'No hay agente de sincronización conectado. Verifica que el script Python esté ejecutándose.'
+        message: `Error de sincronización: ${error.message}`
       };
+    } finally {
+      this.syncing = false;
     }
-
-    // Crear promesa que se resolverá cuando lleguen los datos
-    return new Promise((resolve, reject) => {
-      // Timeout de 60 segundos
-      const timeout = setTimeout(() => {
-        this.pendingRequest = null;
-        reject(new Error('Timeout esperando respuesta del agente de sincronización'));
-      }, 60000);
-
-      this.pendingRequest = { resolve, reject, timeout };
-
-      // Enviar evento al agente
-      try {
-        this.agent!.controller.writeSSE({
-          event: 'sync:request',
-          data: JSON.stringify({ timestamp: Date.now() })
-        });
-        console.log('📡 Solicitud de sincronización enviada al agente');
-      } catch (error) {
-        clearTimeout(timeout);
-        this.pendingRequest = null;
-        this.unregisterAgent();
-        reject(new Error('Error enviando solicitud al agente'));
-      }
-    });
   }
 
-  /**
-   * Procesa los datos recibidos del agente y hace UPSERT en la BD
-   */
   static async processProjectsData(proyectos: ProyectoERP[]): Promise<{ inserted: number; updated: number }> {
     let inserted = 0;
     let updated = 0;
@@ -148,70 +182,35 @@ class SyncService {
       await client.query('BEGIN');
 
       for (const p of proyectos) {
-        // Verificar si existe el proyecto por numero_obra_osmos
         const existing = await client.query(
-          'SELECT id FROM proyectos WHERE numero_obra_osmos = $1',
+          'SELECT id, coordinates_user_override FROM proyectos WHERE numero_obra_osmos = $1',
           [p.numobr]
         );
 
         if (existing.rowCount && existing.rowCount > 0) {
-          // Check if coordinates are user-overridden
-          const overrideCheck = await client.query(
-            'SELECT coordinates_user_override FROM proyectos WHERE numero_obra_osmos = $1',
-            [p.numobr]
-          );
-          const hasOverride = overrideCheck.rows[0]?.coordinates_user_override === true;
-
-          if (hasOverride) {
-            // UPDATE without touching coordinates - user has overridden them
-            await client.query(`
-              UPDATE proyectos SET
-                nombre_proyecto = $1,
-                cadena = $2,
-                mercado = $3,
-                ciudad = $4,
-                inmueble = $5,
-                codigo_postal = $6,
-                descripcion = $7,
-                fecha_cambio = NOW()
-              WHERE numero_obra_osmos = $8
-            `, [
-              p.fpacod || null,
-              p.inscli || null,
-              p.envpai || null,
-              p.envpob || null,
-              p.envdir || null,
-              p.envcpo || null,
-              p.nombre || null,
-              p.numobr
-            ]);
-          } else {
-            // UPDATE normally (geocoding will run after and set coordinates)
-            await client.query(`
-              UPDATE proyectos SET
-                nombre_proyecto = $1,
-                cadena = $2,
-                mercado = $3,
-                ciudad = $4,
-                inmueble = $5,
-                codigo_postal = $6,
-                descripcion = $7,
-                fecha_cambio = NOW()
-              WHERE numero_obra_osmos = $8
-            `, [
-              p.fpacod || null,
-              p.inscli || null,
-              p.envpai || null,
-              p.envpob || null,
-              p.envdir || null,
-              p.envcpo || null,
-              p.nombre || null,
-              p.numobr
-            ]);
-          }
+          await client.query(`
+            UPDATE proyectos SET
+              nombre_proyecto = $1,
+              cadena = $2,
+              mercado = $3,
+              ciudad = $4,
+              inmueble = $5,
+              codigo_postal = $6,
+              descripcion = $7,
+              fecha_cambio = NOW()
+            WHERE numero_obra_osmos = $8
+          `, [
+            p.fpacod || null,
+            p.inscli || null,
+            p.envpai || null,
+            p.envpob || null,
+            p.envdir || null,
+            p.envcpo || null,
+            p.nombre || null,
+            p.numobr
+          ]);
           updated++;
         } else {
-          // INSERT
           await client.query(`
             INSERT INTO proyectos (
               nombre_proyecto, cadena, mercado, ciudad, inmueble,
@@ -232,35 +231,16 @@ class SyncService {
       }
 
       await client.query('COMMIT');
-      console.log(`✅ Sincronización completada: ${inserted} insertados, ${updated} actualizados`);
+      console.log(`✅ Proyectos: ${inserted} insertados, ${updated} actualizados`);
 
-      // Geocodificar proyectos sin coordenadas (en background, no bloquea)
+      // Geocodificar en background
       geocodeProjectsWithoutCoordinates().catch(err => {
         console.error('⚠️ Error en geocodificación post-sync:', err);
       });
 
-      // Resolver la promesa pendiente si existe
-      if (this.pendingRequest) {
-        clearTimeout(this.pendingRequest.timeout);
-        this.pendingRequest.resolve({
-          success: true,
-          message: `Sincronización completada: ${inserted} nuevos, ${updated} actualizados`,
-          count: inserted + updated
-        });
-        this.pendingRequest = null;
-      }
-
       return { inserted, updated };
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('❌ Error en sincronización:', error);
-
-      if (this.pendingRequest) {
-        clearTimeout(this.pendingRequest.timeout);
-        this.pendingRequest.reject(error);
-        this.pendingRequest = null;
-      }
-
       throw error;
     } finally {
       client.release();
@@ -278,9 +258,6 @@ class SyncService {
 
   private static readonly PEDIDOS_BOARD_ID = 61;
 
-  /**
-   * Procesa los pedidos recibidos del agente y crea/actualiza tarjetas en el tablero "Pedidos"
-   */
   static async processPedidosData(pedidos: PedidoERP[]): Promise<{ inserted: number; updated: number }> {
     let inserted = 0;
     let updated = 0;
@@ -289,7 +266,6 @@ class SyncService {
     try {
       await client.query('BEGIN');
 
-      // Cargar todas las tarjetas existentes del board Pedidos de una vez (por título = numped)
       const existingCards = await client.query(
         `SELECT c.id, c.title, c.list_id, c.progress
          FROM cards c
@@ -297,7 +273,6 @@ class SyncService {
          WHERE l.board_id = $1`,
         [this.PEDIDOS_BOARD_ID]
       );
-      // Indexar por los primeros 6 caracteres del título (numped)
       const cardMap = new Map<string, { id: string; list_id: number; progress: number }>();
       for (const row of existingCards.rows) {
         const numped = row.title.substring(0, 6);
@@ -308,24 +283,20 @@ class SyncService {
         const situac = (p.situac || '').trim().toUpperCase();
         const estado = (p.estado || '').trim().toUpperCase();
 
-        // Determinar list_id según situación
         const targetListId = this.SITUAC_TO_LIST[situac];
         if (!targetListId) {
           console.log(`⚠️ Pedido ${p.numped}: situación desconocida '${situac}', ignorando`);
           continue;
         }
 
-        // Determinar progress según estado
         const progress = estado === 'C' ? 100 : 0;
 
-        // Buscar proyecto vinculado
         const proyecto = await client.query(
           'SELECT id FROM proyectos WHERE numero_obra_osmos = $1',
           [p.numobr]
         );
         const proyectoId = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
 
-        // Construir título: "123456 · Proveedor S.L. · 2026-03-10"
         const titleParts = [p.numped];
         if (p.fisnom) titleParts.push(p.fisnom);
         if (p.fecped) titleParts.push(p.fecped.substring(0, 10));
@@ -334,7 +305,6 @@ class SyncService {
         const existingCard = cardMap.get(p.numped);
 
         if (existingCard) {
-          // UPDATE: actualizar título, list_id, progress, start_date, proyecto_id
           await client.query(`
             UPDATE cards SET
               title = $1,
@@ -353,7 +323,6 @@ class SyncService {
           ]);
           updated++;
         } else {
-          // INSERT: nueva tarjeta al final de la lista
           const posResult = await client.query(
             'SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM cards WHERE list_id = $1',
             [targetListId]
@@ -377,36 +346,26 @@ class SyncService {
       }
 
       await client.query('COMMIT');
-      console.log(`✅ Pedidos sincronizados en tablero: ${inserted} tarjetas creadas, ${updated} actualizadas`);
+      console.log(`✅ Pedidos: ${inserted} tarjetas creadas, ${updated} actualizadas`);
       return { inserted, updated };
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('❌ Error sincronizando pedidos en tablero:', error);
       throw error;
     } finally {
       client.release();
     }
   }
-
-  /**
-   * Envía heartbeat al agente
-   */
-  static sendHeartbeat(): void {
-    if (this.agent && !this.agent.aborted) {
-      try {
-        this.agent.controller.writeSSE({ event: 'ping', data: 'heartbeat' });
-      } catch (error) {
-        console.error('❌ Error enviando heartbeat al agente:', error);
-        this.unregisterAgent();
-      }
-    }
-  }
 }
 
-// Heartbeat cada 30 segundos
-setInterval(() => {
-  SyncService.sendHeartbeat();
-}, 30000);
+// ================================
+// Cron: sincronización automática diaria a las 7:00
+// ================================
+cron.schedule('0 7 * * *', async () => {
+  console.log('⏰ Sincronización automática programada iniciada');
+  const result = await SyncService.requestSync();
+  console.log(`⏰ Resultado sync automático: ${result.message}`);
+});
+console.log('⏰ Cron de sincronización configurado: todos los días a las 7:00');
 
 // ================================
 // Geocodificación
@@ -419,11 +378,6 @@ const geocoder = NodeGeocoder({
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/**
- * Geocodifica proyectos que tienen dirección pero no coordenadas.
- * Usa estrategia de fallback: dirección completa → ciudad+país → solo ciudad.
- * Respeta el rate limit de Nominatim (1 req/s).
- */
 async function geocodeProjectsWithoutCoordinates(): Promise<void> {
   const result = await pool.query(`
     SELECT id, ciudad, inmueble, codigo_postal, mercado
@@ -443,10 +397,8 @@ async function geocodeProjectsWithoutCoordinates(): Promise<void> {
 
   for (const row of result.rows) {
     try {
-      // Construir variantes de dirección (de más específica a menos)
       const attempts: string[] = [];
 
-      // 1) Dirección completa
       const fullParts: string[] = [];
       if (row.inmueble) fullParts.push(row.inmueble);
       if (row.codigo_postal) fullParts.push(row.codigo_postal);
@@ -454,7 +406,6 @@ async function geocodeProjectsWithoutCoordinates(): Promise<void> {
       if (row.mercado) fullParts.push(row.mercado);
       if (fullParts.length > 0) attempts.push(fullParts.join(', '));
 
-      // 2) Sin inmueble (código postal + ciudad + país)
       if (row.inmueble && (row.ciudad || row.codigo_postal)) {
         const noParts: string[] = [];
         if (row.codigo_postal) noParts.push(row.codigo_postal);
@@ -464,7 +415,6 @@ async function geocodeProjectsWithoutCoordinates(): Promise<void> {
         if (noInmueble !== attempts[0]) attempts.push(noInmueble);
       }
 
-      // 3) Solo ciudad + país
       if (row.ciudad && row.mercado) {
         const cityCountry = `${row.ciudad}, ${row.mercado}`;
         if (!attempts.includes(cityCountry)) attempts.push(cityCountry);
@@ -504,45 +454,6 @@ async function geocodeProjectsWithoutCoordinates(): Promise<void> {
 // ================================
 export const syncRoutes = new Hono<{ Variables: Variables }>();
 
-/**
- * SSE endpoint para el agente de sincronización (Python script)
- * Autenticación por API key
- */
-syncRoutes.get('/sync/agent', async (c: Context) => {
-  const apiKey = c.req.query('api_key');
-
-  if (apiKey !== SYNC_API_KEY) {
-    return c.json({ error: 'API key inválida' }, 401);
-  }
-
-  console.log('🔌 Agente de sincronización conectando...');
-
-  return streamSSE(c, async (stream) => {
-    const agentId = SyncService.registerAgent(stream);
-
-    // Enviar confirmación de conexión
-    await stream.writeSSE({
-      event: 'connected',
-      data: JSON.stringify({ agentId, message: 'Conectado al servidor de sincronización' })
-    });
-
-    // Mantener conexión abierta
-    try {
-      while (true) {
-        await stream.sleep(10000);
-      }
-    } catch (error) {
-      console.log('🔌 Conexión del agente cerrada');
-    } finally {
-      SyncService.unregisterAgent();
-    }
-  });
-});
-
-/**
- * Endpoint para que los usuarios soliciten sincronización
- * Requiere autenticación JWT
- */
 syncRoutes.post('/sync/request', keycloakAuthMiddleware, async (c: Context) => {
   try {
     const result = await SyncService.requestSync();
@@ -556,86 +467,27 @@ syncRoutes.post('/sync/request', keycloakAuthMiddleware, async (c: Context) => {
   }
 });
 
-/**
- * Endpoint para que el agente envíe los datos de proyectos
- * Autenticación por API key
- */
-syncRoutes.post('/sync/projects', async (c: Context) => {
-  const apiKey = c.req.header('X-API-Key') || c.req.query('api_key');
+syncRoutes.get('/sync/status', keycloakAuthMiddleware, async (c: Context) => {
+  return c.json({
+    agentConnected: true,
+    timestamp: new Date().toISOString()
+  });
+});
 
-  if (apiKey !== SYNC_API_KEY) {
-    return c.json({ error: 'API key inválida' }, 401);
-  }
-
+syncRoutes.post('/sync/geocode', keycloakAuthMiddleware, async (c: Context) => {
   try {
-    const body = await c.req.json();
-    const proyectos: ProyectoERP[] = body.proyectos;
-
-    if (!Array.isArray(proyectos)) {
-      return c.json({ error: 'Se esperaba un array de proyectos' }, 400);
-    }
-
-    console.log(`📥 Recibidos ${proyectos.length} proyectos del agente`);
-
-    const result = await SyncService.processProjectsData(proyectos);
-
+    geocodeProjectsWithoutCoordinates().catch(err => {
+      console.error('⚠️ Error en geocodificación manual:', err);
+    });
     return c.json({
       success: true,
-      inserted: result.inserted,
-      updated: result.updated,
-      total: result.inserted + result.updated
+      message: 'Geocodificación iniciada en segundo plano'
     });
   } catch (error: any) {
-    console.error('Error procesando proyectos:', error);
-    return c.json({
-      error: 'Error procesando proyectos',
-      details: error.message
-    }, 500);
+    return c.json({ error: error.message }, 500);
   }
 });
 
-/**
- * Endpoint para que el agente envíe los datos de pedidos
- * Autenticación por API key
- */
-syncRoutes.post('/sync/pedidos', async (c: Context) => {
-  const apiKey = c.req.header('X-API-Key') || c.req.query('api_key');
-
-  if (apiKey !== SYNC_API_KEY) {
-    return c.json({ error: 'API key inválida' }, 401);
-  }
-
-  try {
-    const body = await c.req.json();
-    const pedidos: PedidoERP[] = body.pedidos;
-
-    if (!Array.isArray(pedidos)) {
-      return c.json({ error: 'Se esperaba un array de pedidos' }, 400);
-    }
-
-    console.log(`📥 Recibidos ${pedidos.length} pedidos del agente`);
-
-    const result = await SyncService.processPedidosData(pedidos);
-
-    return c.json({
-      success: true,
-      inserted: result.inserted,
-      updated: result.updated,
-      total: result.inserted + result.updated
-    });
-  } catch (error: any) {
-    console.error('Error procesando pedidos:', error);
-    return c.json({
-      error: 'Error procesando pedidos',
-      details: error.message
-    }, 500);
-  }
-});
-
-/**
- * Endpoint para obtener todos los pedidos con información del proyecto
- * Requiere autenticación JWT
- */
 syncRoutes.get('/pedidos', keycloakAuthMiddleware, async (c: Context) => {
   try {
     const result = await pool.query(`
@@ -666,10 +518,6 @@ syncRoutes.get('/pedidos', keycloakAuthMiddleware, async (c: Context) => {
   }
 });
 
-/**
- * Endpoint para actualizar un pedido (is_collected, notas)
- * Requiere autenticación JWT
- */
 syncRoutes.put('/pedidos/:id', keycloakAuthMiddleware, async (c: Context) => {
   const id = c.req.param('id');
   try {
@@ -708,10 +556,6 @@ syncRoutes.put('/pedidos/:id', keycloakAuthMiddleware, async (c: Context) => {
   }
 });
 
-/**
- * Endpoint para vincular un pedido a la tarjeta actual (logística)
- * Crea una entrada en cards_packages vinculando el pedido
- */
 syncRoutes.post('/pedidos/:id/link-card', keycloakAuthMiddleware, async (c: Context) => {
   const pedidoId = c.req.param('id');
   try {
@@ -722,7 +566,6 @@ syncRoutes.post('/pedidos/:id/link-card', keycloakAuthMiddleware, async (c: Cont
       return c.json({ error: 'card_id es requerido' }, 400);
     }
 
-    // Marcar el pedido como vinculado a logística
     await pool.query(
       'UPDATE pedidos SET is_collected = true WHERE id = $1',
       [pedidoId]
@@ -731,34 +574,6 @@ syncRoutes.post('/pedidos/:id/link-card', keycloakAuthMiddleware, async (c: Cont
     return c.json({ success: true });
   } catch (error: any) {
     console.error('Error vinculando pedido:', error);
-    return c.json({ error: error.message }, 500);
-  }
-});
-
-/**
- * Endpoint para verificar estado del agente de sincronización
- */
-syncRoutes.get('/sync/status', keycloakAuthMiddleware, async (c: Context) => {
-  return c.json({
-    agentConnected: SyncService.isAgentConnected(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-/**
- * Endpoint para forzar geocodificación de proyectos sin coordenadas
- * Requiere autenticación JWT
- */
-syncRoutes.post('/sync/geocode', keycloakAuthMiddleware, async (c: Context) => {
-  try {
-    geocodeProjectsWithoutCoordinates().catch(err => {
-      console.error('⚠️ Error en geocodificación manual:', err);
-    });
-    return c.json({
-      success: true,
-      message: 'Geocodificación iniciada en segundo plano'
-    });
-  } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
 });
