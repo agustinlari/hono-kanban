@@ -663,9 +663,11 @@ class CardService {
                p.codigo as proyecto_codigo, p.cod_integracion as proyecto_cod_integracion,
                p.cadena as proyecto_cadena, p.mercado as proyecto_mercado, p.ciudad as proyecto_ciudad, p.inmueble as proyecto_inmueble,
                p.numero_obra_osmos as proyecto_numero_obra_osmos, p.inicio_obra_prevista as proyecto_inicio_obra_prevista,
-               p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim
+               p.apert_espacio_prevista as proyecto_apert_espacio_prevista, p.es_bim as proyecto_es_bim,
+               ot.id as ot_id, ot.numano as ot_numano, ot.numotr as ot_numotr, ot.descripcion as ot_descripcion
         FROM cards c
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN ordenes_trabajo ot ON c.ot_id = ot.id
         LEFT JOIN (
           SELECT ca.card_id,
                  json_agg(
@@ -1237,11 +1239,22 @@ class CardService {
           c.start_date,
           c.due_date,
           c.proyecto_id,
+          c.ot_id,
           c.peticion_id,
           l.title as list_title,
           l.board_id,
           b.name as board_name,
           b.badge_settings,
+          CASE
+            WHEN ot.id IS NOT NULL THEN
+              jsonb_build_object(
+                'id', ot.id,
+                'numano', ot.numano,
+                'numotr', ot.numotr,
+                'descripcion', ot.descripcion
+              )
+            ELSE NULL
+          END as orden_trabajo,
           CASE
             WHEN p.id IS NOT NULL THEN
               jsonb_build_object(
@@ -1290,6 +1303,7 @@ class CardService {
         INNER JOIN lists l ON c.list_id = l.id
         INNER JOIN boards b ON l.board_id = b.id
         LEFT JOIN proyectos p ON c.proyecto_id = p.id
+        LEFT JOIN ordenes_trabajo ot ON c.ot_id = ot.id
         LEFT JOIN card_assignments ca ON c.id = ca.card_id
         LEFT JOIN usuarios u ON ca.user_id = u.id
         LEFT JOIN card_labels cl ON c.id = cl.card_id

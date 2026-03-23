@@ -20,10 +20,10 @@ export interface EmailMessage {
 
 export interface EmailMatchResult {
   email: EmailMessage;
-  matchedCardId: string;
-  matchedCardTitle: string;
+  matchedCards: { cardId: string; cardTitle: string; boardId: number }[];
   pedidoNumber: string;
-  commentCreated: boolean;
+  otId: number | null;
+  commentsCreated: number;
 }
 
 const imapConfig = {
@@ -57,27 +57,73 @@ export class ImapService {
   }
 
   /**
-   * Busca tarjetas en el tablero de Pedidos que coincidan con alguno de los números
+   * Busca tarjetas que coincidan con alguno de los números de pedido.
+   * 1. Busca la tarjeta del pedido en el tablero Pedidos (por título)
+   * 2. Busca la OT del pedido en la tabla pedidos → ordenes_trabajo
+   * 3. Busca todas las tarjetas de cualquier tablero que tengan esa OT asignada
    */
-  async findMatchingCard(numbers: string[]): Promise<{ cardId: string; cardTitle: string; pedidoNumber: string } | null> {
+  async findMatchingCards(numbers: string[]): Promise<{
+    cards: { cardId: string; cardTitle: string; boardId: number }[];
+    pedidoNumber: string;
+    otId: number | null;
+  } | null> {
     if (numbers.length === 0) return null;
 
-    // Buscar tarjetas cuyo título empiece por alguno de estos números
-    const placeholders = numbers.map((_, i) => `c.title LIKE $${i + 1} || '%'`).join(' OR ');
-    const query = `
-      SELECT c.id, c.title FROM cards c
-      JOIN lists l ON c.list_id = l.id
-      WHERE l.board_id = ${PEDIDOS_BOARD_ID} AND (${placeholders})
-      LIMIT 1
-    `;
+    const cards: { cardId: string; cardTitle: string; boardId: number }[] = [];
+    let matchedPedidoNumber = '';
+    let otId: number | null = null;
 
-    const result = await pool.query(query, numbers);
-    if (result.rows.length > 0) {
-      const card = result.rows[0];
-      const matchedNum = numbers.find(n => card.title.startsWith(n)) || numbers[0];
-      return { cardId: card.id, cardTitle: card.title, pedidoNumber: matchedNum };
+    // 1. Buscar tarjeta del pedido en tablero Pedidos
+    const placeholders = numbers.map((_, i) => `c.title LIKE $${i + 1} || '%'`).join(' OR ');
+    const pedidoCardResult = await pool.query(
+      `SELECT c.id, c.title, l.board_id FROM cards c
+       JOIN lists l ON c.list_id = l.id
+       WHERE l.board_id = ${PEDIDOS_BOARD_ID} AND (${placeholders})
+       LIMIT 1`,
+      numbers
+    );
+
+    if (pedidoCardResult.rows.length > 0) {
+      const card = pedidoCardResult.rows[0];
+      matchedPedidoNumber = numbers.find(n => card.title.startsWith(n)) || numbers[0];
+      cards.push({ cardId: card.id, cardTitle: card.title, boardId: card.board_id });
     }
-    return null;
+
+    if (!matchedPedidoNumber) return null;
+
+    // 2. Buscar OT del pedido
+    const pedidoResult = await pool.query(
+      'SELECT numotr FROM pedidos WHERE numero_pedido = $1 AND numotr IS NOT NULL',
+      [matchedPedidoNumber]
+    );
+
+    if (pedidoResult.rows.length > 0 && pedidoResult.rows[0].numotr) {
+      const numotr = pedidoResult.rows[0].numotr;
+
+      // Buscar el id de la OT en ordenes_trabajo
+      const otResult = await pool.query(
+        'SELECT id FROM ordenes_trabajo WHERE numotr = $1 ORDER BY numano DESC LIMIT 1',
+        [numotr]
+      );
+
+      if (otResult.rows.length > 0) {
+        otId = otResult.rows[0].id;
+
+        // 3. Buscar tarjetas con esa OT asignada (en cualquier tablero, excluyendo la ya encontrada)
+        const otCardsResult = await pool.query(
+          `SELECT c.id, c.title, l.board_id FROM cards c
+           JOIN lists l ON c.list_id = l.id
+           WHERE c.ot_id = $1 AND c.id != $2`,
+          [otId, cards[0]?.cardId || '']
+        );
+
+        for (const row of otCardsResult.rows) {
+          cards.push({ cardId: row.id, cardTitle: row.title, boardId: row.board_id });
+        }
+      }
+    }
+
+    return { cards, pedidoNumber: matchedPedidoNumber, otId };
   }
 
   /**
@@ -168,26 +214,30 @@ export class ImapService {
 
             // Extraer números de 6 dígitos del asunto
             const numbers = this.extractSixDigitNumbers(email.subject);
-            const matchResult = await this.findMatchingCard(numbers);
+            const matchResult = await this.findMatchingCards(numbers);
 
-            if (matchResult) {
-              // Crear comentario en la tarjeta
+            if (matchResult && matchResult.cards.length > 0) {
               const commentText = this.formatEmailComment(email);
-              await pool.query(
-                `INSERT INTO card_activity (card_id, user_id, activity_type, description)
-                 VALUES ($1, $2, 'COMMENT', $3)`,
-                [matchResult.cardId, systemUserId, commentText]
-              );
+
+              // Crear comentario en TODAS las tarjetas que coincidan
+              for (const card of matchResult.cards) {
+                await pool.query(
+                  `INSERT INTO card_activity (card_id, user_id, activity_type, description)
+                   VALUES ($1, $2, 'COMMENT', $3)`,
+                  [card.cardId, systemUserId, commentText]
+                );
+              }
 
               matched.push({
                 email,
-                matchedCardId: matchResult.cardId,
-                matchedCardTitle: matchResult.cardTitle,
+                matchedCards: matchResult.cards,
                 pedidoNumber: matchResult.pedidoNumber,
-                commentCreated: true,
+                otId: matchResult.otId,
+                commentsCreated: matchResult.cards.length,
               });
 
-              console.log(`✅ [IMAP] Email UID ${uid} → Pedido ${matchResult.pedidoNumber} (tarjeta: ${matchResult.cardTitle})`);
+              const cardNames = matchResult.cards.map(c => c.cardTitle).join(', ');
+              console.log(`✅ [IMAP] Email UID ${uid} → Pedido ${matchResult.pedidoNumber} → ${matchResult.cards.length} tarjeta(s): ${cardNames}`);
             } else {
               unmatched.push(email);
               console.log(`⚠️ [IMAP] Email UID ${uid} sin match: "${email.subject}"`);

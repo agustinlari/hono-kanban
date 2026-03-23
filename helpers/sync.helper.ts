@@ -57,6 +57,14 @@ interface PedidoERP {
   fecped: string;
   situac: string;
   estado: string;
+  numotr: number | null;
+}
+
+interface OrdenTrabajoERP {
+  numano: number;
+  numobr: string;
+  numotr: number;
+  descri: string;
 }
 
 // ================================
@@ -110,7 +118,8 @@ async function fetchPedidosFromERP(): Promise<PedidoERP[]> {
         pediprov.fisnom,
         pediprov.fecped,
         pediprov.situac,
-        pediprov.estado
+        pediprov.estado,
+        pediprov.numotr
       FROM pediprov
       WHERE pediprov.numalm = 1
         AND pediprov.numemp = 2
@@ -124,10 +133,39 @@ async function fetchPedidosFromERP(): Promise<PedidoERP[]> {
       fecped: row.fecped ? new Date(row.fecped).toISOString() : '',
       situac: String(row.situac || '').trim(),
       estado: String(row.estado || '').trim(),
+      numotr: row.numotr ? Number(row.numotr) : null,
     }));
 
     console.log(`✅ Obtenidos ${pedidos.length} pedidos de SQL Server`);
     return pedidos;
+  } finally {
+    await connection.close();
+  }
+}
+
+async function fetchOrdenesTrabajoFromERP(): Promise<OrdenTrabajoERP[]> {
+  console.log('📡 Consultando órdenes de trabajo en SQL Server...');
+  const connection = await sql.connect(ERP_CONFIG);
+  try {
+    const result = await connection.request().query(`
+      SELECT
+        ordentrab.numaño,
+        ordentrab.numobr,
+        ordentrab.numotr,
+        ordentrab.descri
+      FROM ordentrab
+      WHERE ordentrab.numemp = 2
+    `);
+
+    const ots: OrdenTrabajoERP[] = result.recordset.map((row: any) => ({
+      numano: Number(row['numaño'] || 0),
+      numobr: String(row.numobr || '').trim(),
+      numotr: Number(row.numotr || 0),
+      descri: String(row.descri || '').trim(),
+    }));
+
+    console.log(`✅ Obtenidas ${ots.length} órdenes de trabajo de SQL Server`);
+    return ots;
   } finally {
     await connection.close();
   }
@@ -150,18 +188,23 @@ class SyncService {
       const proyectos = await fetchProyectosFromERP();
       const projectResult = await this.processProjectsData(proyectos);
 
-      // 2. Sincronizar pedidos
+      // 2. Sincronizar órdenes de trabajo
+      const ots = await fetchOrdenesTrabajoFromERP();
+      const otResult = await this.processOrdenesTrabajoData(ots);
+
+      // 3. Sincronizar pedidos
       const pedidos = await fetchPedidosFromERP();
       const pedidosResult = await this.processPedidosData(pedidos);
 
       const message = `Proyectos: ${projectResult.inserted} nuevos, ${projectResult.updated} actualizados. ` +
+        `OTs: ${otResult.inserted} nuevas, ${otResult.updated} actualizadas. ` +
         `Pedidos: ${pedidosResult.inserted} nuevos, ${pedidosResult.updated} actualizados.`;
 
       console.log(`✅ Sincronización completa: ${message}`);
       return {
         success: true,
         message,
-        count: projectResult.inserted + projectResult.updated + pedidosResult.inserted + pedidosResult.updated
+        count: projectResult.inserted + projectResult.updated + otResult.inserted + otResult.updated + pedidosResult.inserted + pedidosResult.updated
       };
     } catch (error: any) {
       console.error('❌ Error en sincronización:', error);
@@ -248,6 +291,48 @@ class SyncService {
     }
   }
 
+  static async processOrdenesTrabajoData(ots: OrdenTrabajoERP[]): Promise<{ inserted: number; updated: number }> {
+    let inserted = 0;
+    let updated = 0;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const ot of ots) {
+        const existing = await client.query(
+          'SELECT id FROM ordenes_trabajo WHERE numano = $1 AND numotr = $2',
+          [ot.numano, ot.numotr]
+        );
+
+        if (existing.rows.length > 0) {
+          await client.query(
+            `UPDATE ordenes_trabajo SET numobr = $1, descripcion = $2, updated_at = NOW()
+             WHERE numano = $3 AND numotr = $4`,
+            [ot.numobr, ot.descri, ot.numano, ot.numotr]
+          );
+          updated++;
+        } else {
+          await client.query(
+            `INSERT INTO ordenes_trabajo (numano, numobr, numotr, descripcion)
+             VALUES ($1, $2, $3, $4)`,
+            [ot.numano, ot.numobr, ot.numotr, ot.descri]
+          );
+          inserted++;
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log(`✅ OTs: ${inserted} insertadas, ${updated} actualizadas`);
+      return { inserted, updated };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   // Mapeo de situación ERP -> list_id en board "Pedidos" (id=61)
   private static readonly SITUAC_TO_LIST: Record<string, number> = {
     'E': 112,  // Enviado
@@ -298,6 +383,34 @@ class SyncService {
         );
         const proyectoId = proyecto.rows.length > 0 ? proyecto.rows[0].id : null;
 
+        // Buscar OT asociada al pedido
+        let otId = null;
+        if (p.numotr) {
+          const otResult = await client.query(
+            'SELECT id FROM ordenes_trabajo WHERE numobr = $1 AND numotr = $2 ORDER BY numano DESC LIMIT 1',
+            [p.numobr, p.numotr]
+          );
+          otId = otResult.rows.length > 0 ? otResult.rows[0].id : null;
+        }
+
+        // Upsert en tabla pedidos
+        const existingPedido = await client.query(
+          'SELECT id FROM pedidos WHERE numero_pedido = $1', [p.numped]
+        );
+        if (existingPedido.rows.length > 0) {
+          await client.query(
+            `UPDATE pedidos SET id_proyecto = $1, nombre_proveedor = $2, fecha_pedido = $3, numotr = $4
+             WHERE numero_pedido = $5`,
+            [proyectoId, p.fisnom || null, p.fecped || null, p.numotr, p.numped]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO pedidos (numero_pedido, id_proyecto, nombre_proveedor, fecha_pedido, numotr)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [p.numped, proyectoId, p.fisnom || null, p.fecped || null, p.numotr]
+          );
+        }
+
         const titleParts = [p.numped];
         if (p.fisnom) titleParts.push(p.fisnom);
         if (p.fecped) titleParts.push(p.fecped.substring(0, 10));
@@ -312,14 +425,16 @@ class SyncService {
               list_id = $2,
               progress = $3,
               start_date = $4,
-              proyecto_id = $5
-            WHERE id = $6
+              proyecto_id = $5,
+              ot_id = $6
+            WHERE id = $7
           `, [
             title,
             targetListId,
             progress,
             p.fecped || null,
             proyectoId,
+            otId,
             existingCard.id
           ]);
           updated++;
@@ -331,8 +446,8 @@ class SyncService {
           const nextPos = posResult.rows[0].next_pos;
 
           await client.query(`
-            INSERT INTO cards (title, description, position, list_id, start_date, proyecto_id, progress)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO cards (title, description, position, list_id, start_date, proyecto_id, progress, ot_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           `, [
             title,
             p.fisnom || null,
@@ -340,7 +455,8 @@ class SyncService {
             targetListId,
             p.fecped || null,
             proyectoId,
-            progress
+            progress,
+            otId
           ]);
           inserted++;
         }
@@ -489,6 +605,32 @@ syncRoutes.post('/sync/geocode', keycloakAuthMiddleware, async (c: Context) => {
   }
 });
 
+// Obtener órdenes de trabajo (opcionalmente filtradas por numobr del proyecto)
+syncRoutes.get('/ordenes-trabajo', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const numobr = c.req.query('numobr');
+
+    let query = `
+      SELECT ot.id, ot.numano, ot.numobr, ot.numotr, ot.descripcion
+      FROM ordenes_trabajo ot
+    `;
+    const params: any[] = [];
+
+    if (numobr) {
+      query += ' WHERE ot.numobr = $1';
+      params.push(numobr);
+    }
+
+    query += ' ORDER BY ot.numano DESC, ot.numotr DESC';
+
+    const result = await pool.query(query, params);
+    return c.json(result.rows);
+  } catch (error: any) {
+    console.error('Error obteniendo OTs:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
 syncRoutes.get('/pedidos', keycloakAuthMiddleware, async (c: Context) => {
   try {
     const result = await pool.query(`
@@ -601,13 +743,14 @@ syncRoutes.post('/email/process-orders', keycloakAuthMiddleware, async (c: Conte
 
     return c.json({
       success: true,
-      message: `${result.matched.length} correos vinculados a pedidos, ${result.unmatched.length} sin coincidencia`,
+      message: `${result.matched.length} correos vinculados, ${result.matched.reduce((sum, m) => sum + m.commentsCreated, 0)} comentarios creados, ${result.unmatched.length} sin coincidencia`,
       processed: result.processed,
       matched: result.matched.map(m => ({
         subject: m.email.subject,
         from: m.email.from,
         pedidoNumber: m.pedidoNumber,
-        cardTitle: m.matchedCardTitle,
+        commentsCreated: m.commentsCreated,
+        cards: m.matchedCards.map(c => c.cardTitle),
       })),
       unmatched: result.unmatched.map(u => ({
         subject: u.subject,

@@ -107,6 +107,7 @@ export interface UpdateCardPayload {
   description?: string;
   image_url?: string;
   proyecto_id?: number | null;
+  ot_id?: number | null;
   start_date?: Date | null;
   due_date?: Date | null;
   progress?: number | null; // Progreso de la tarjeta (0-100)
