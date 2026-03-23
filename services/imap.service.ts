@@ -218,7 +218,13 @@ export class ImapService {
   /**
    * Recupera un correo específico por UID para el visor completo
    */
-  async fetchEmailByUid(uid: number): Promise<{ html: string; subject: string; from: string; date: string } | null> {
+  async fetchEmailByUid(uid: number): Promise<{
+    html: string;
+    subject: string;
+    from: string;
+    date: string;
+    attachments: { filename: string; size: number; contentType: string; index: number }[];
+  } | null> {
     const client = createImapClient();
 
     try {
@@ -241,12 +247,61 @@ export class ImapService {
           subject: parsed.subject || '(sin asunto)',
           from: fromAddr?.name || fromAddr?.address || 'desconocido',
           date: parsed.date?.toISOString() || '',
+          attachments: (parsed.attachments || []).map((a: any, index: number) => ({
+            filename: a.filename || 'sin-nombre',
+            size: a.size,
+            contentType: a.contentType,
+            index,
+          })),
         };
       } finally {
         lock.release();
       }
     } catch (error: any) {
       console.error(`❌ [IMAP] Error recuperando UID ${uid}:`, error.message);
+      return null;
+    } finally {
+      try { await client.logout(); } catch {}
+    }
+  }
+
+  /**
+   * Descarga un adjunto específico de un correo por UID e índice
+   */
+  async fetchAttachment(uid: number, attachmentIndex: number): Promise<{
+    content: Buffer;
+    filename: string;
+    contentType: string;
+  } | null> {
+    const client = createImapClient();
+
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock('INBOX');
+
+      try {
+        const message = await client.fetchOne(String(uid), {
+          source: true,
+          uid: true,
+        }, { uid: true });
+
+        if (!message?.source) return null;
+
+        const parsed = await simpleParser(message.source);
+        const attachment = parsed.attachments?.[attachmentIndex];
+
+        if (!attachment) return null;
+
+        return {
+          content: attachment.content,
+          filename: attachment.filename || 'adjunto',
+          contentType: attachment.contentType,
+        };
+      } finally {
+        lock.release();
+      }
+    } catch (error: any) {
+      console.error(`❌ [IMAP] Error descargando adjunto UID ${uid}:`, error.message);
       return null;
     } finally {
       try { await client.logout(); } catch {}

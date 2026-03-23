@@ -22,12 +22,13 @@ export interface AppUser {
 export async function keycloakAuthMiddleware(c: Context, next: Next) {
   try {
     const authHeader = c.req.header('Authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const queryToken = c.req.query('token');
+
+    if ((!authHeader || !authHeader.startsWith('Bearer ')) && !queryToken) {
       return c.json({ error: 'Token de autenticación requerido' }, 401);
     }
 
-    const token = authHeader.substring(7);
+    const token = queryToken || authHeader!.substring(7);
     
     // Validar token con Keycloak
     const keycloakUser = await validateKeycloakToken(token);

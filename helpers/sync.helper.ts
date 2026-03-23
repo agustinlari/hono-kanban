@@ -641,9 +641,36 @@ syncRoutes.get('/email/view/:uid', keycloakAuthMiddleware, async (c: Context) =>
       from: email.from,
       date: email.date,
       html: email.html,
+      attachments: email.attachments,
     });
   } catch (error: any) {
     console.error('Error recuperando correo:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Descargar adjunto de un correo por UID e índice
+syncRoutes.get('/email/:uid/attachment/:index', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const uid = parseInt(c.req.param('uid'));
+    const index = parseInt(c.req.param('index'));
+
+    if (isNaN(uid) || isNaN(index)) {
+      return c.json({ error: 'Parámetros inválidos' }, 400);
+    }
+
+    const attachment = await imapService.fetchAttachment(uid, index);
+    if (!attachment) {
+      return c.json({ error: 'Adjunto no encontrado' }, 404);
+    }
+
+    c.header('Content-Type', attachment.contentType);
+    c.header('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.filename)}"`);
+    c.header('Content-Length', String(attachment.content.length));
+
+    return c.body(attachment.content);
+  } catch (error: any) {
+    console.error('Error descargando adjunto:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
