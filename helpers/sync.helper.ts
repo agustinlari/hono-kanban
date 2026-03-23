@@ -593,6 +593,61 @@ syncRoutes.get('/email/test', keycloakAuthMiddleware, async (c: Context) => {
   }
 });
 
+// Procesar correos de pedidos (vincula emails no leídos a tarjetas)
+syncRoutes.post('/email/process-orders', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const user = c.get('user') as any;
+    const result = await imapService.processOrderEmails(user.userId);
+
+    return c.json({
+      success: true,
+      message: `${result.matched.length} correos vinculados a pedidos, ${result.unmatched.length} sin coincidencia`,
+      processed: result.processed,
+      matched: result.matched.map(m => ({
+        subject: m.email.subject,
+        from: m.email.from,
+        pedidoNumber: m.pedidoNumber,
+        cardTitle: m.matchedCardTitle,
+      })),
+      unmatched: result.unmatched.map(u => ({
+        subject: u.subject,
+        from: u.from,
+        uid: u.uid,
+      })),
+      errors: result.errors,
+    });
+  } catch (error: any) {
+    console.error('Error procesando correos de pedidos:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Visor de correo completo por UID (retorna HTML)
+syncRoutes.get('/email/view/:uid', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const uid = parseInt(c.req.param('uid'));
+    if (isNaN(uid)) {
+      return c.json({ error: 'UID inválido' }, 400);
+    }
+
+    const email = await imapService.fetchEmailByUid(uid);
+    if (!email) {
+      return c.json({ error: 'Correo no encontrado' }, 404);
+    }
+
+    return c.json({
+      success: true,
+      subject: email.subject,
+      from: email.from,
+      date: email.date,
+      html: email.html,
+    });
+  } catch (error: any) {
+    console.error('Error recuperando correo:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 // Leer correos recientes
 syncRoutes.get('/email/fetch', keycloakAuthMiddleware, async (c: Context) => {
   try {
