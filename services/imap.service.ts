@@ -90,13 +90,12 @@ export class ImapService {
       ? `\n📎 Adjuntos: ${email.attachments.map(a => a.filename).join(', ')}`
       : '';
 
-    return `📧 {bold}Correo recibido{/bold} — ${date}\n` +
+    return `📧 {bold}Correo recibido{/bold} — ${date} [email_uid:${email.uid}]\n` +
       `De: ${email.from} (${email.fromAddress})\n` +
       `Asunto: ${email.subject}\n` +
       `---\n` +
       `${preview}${preview.length >= 500 ? '...' : ''}` +
-      `${attachmentsInfo}\n` +
-      `[email_uid:${email.uid}]`;
+      `${attachmentsInfo}`;
   }
 
   /**
