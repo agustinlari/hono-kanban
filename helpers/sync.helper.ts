@@ -76,7 +76,7 @@ async function fetchProyectosFromERP(): Promise<ProyectoERP[]> {
         obras.numobr,
         obras.nombre
       FROM obras
-      WHERE (obras.fpacod='X060' OR obras.fpacod='CF60' OR obras.fpacod='C000')
+      WHERE (obras.fpacod='X060' OR obras.fpacod='CF90' OR obras.fpacod='CF60' OR obras.fpacod='C000')
         AND obras.numemp = 2
     `);
 
