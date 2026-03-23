@@ -7,6 +7,7 @@ import { pool } from '../config/database';
 import type { Variables } from '../types';
 import { keycloakAuthMiddleware } from '../middleware/keycloak-auth';
 import NodeGeocoder from 'node-geocoder';
+import { imapService } from '../services/imap.service';
 
 // ================================
 // Configuración SQL Server (ERP)
@@ -575,5 +576,32 @@ syncRoutes.post('/pedidos/:id/link-card', keycloakAuthMiddleware, async (c: Cont
   } catch (error: any) {
     console.error('Error vinculando pedido:', error);
     return c.json({ error: error.message }, 500);
+  }
+});
+
+// ================================
+// Rutas de lectura de correos (IMAP)
+// ================================
+
+// Test de conexión IMAP
+syncRoutes.get('/email/test', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const result = await imapService.testConnection();
+    return c.json(result);
+  } catch (error: any) {
+    return c.json({ success: false, message: error.message }, 500);
+  }
+});
+
+// Leer correos recientes
+syncRoutes.get('/email/fetch', keycloakAuthMiddleware, async (c: Context) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '10');
+    const onlyUnseen = c.req.query('unseen') === 'true';
+    const emails = await imapService.fetchEmails(limit, onlyUnseen);
+    return c.json({ success: true, count: emails.length, emails });
+  } catch (error: any) {
+    console.error('Error leyendo correos:', error);
+    return c.json({ success: false, error: error.message }, 500);
   }
 });
