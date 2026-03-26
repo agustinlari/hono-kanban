@@ -8,6 +8,7 @@ import { cors } from 'hono/cors'; // Importar CORS
 import { routes } from './routes';
 import { PORT } from './config/env';
 import type { Variables } from './types';
+import { startScheduler } from './services/scheduler.service';
 
 
 console.log("Iniciando script index.ts...");
@@ -37,6 +38,7 @@ serve({
   port: PORT,
 }, (info) => {
   console.log(`Servidor corriendo en http://localhost:${info.port}`);
+  startScheduler();
 });
 
 export default app;

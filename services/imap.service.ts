@@ -74,13 +74,13 @@ export class ImapService {
     let otId: number | null = null;
 
     // 1. Buscar tarjeta del pedido en tablero Pedidos
-    const placeholders = numbers.map((_, i) => `c.title LIKE $${i + 1} || '%'`).join(' OR ');
+    const placeholders = numbers.map((_, i) => `c.title LIKE $${i + 1}`).join(' OR ');
     const pedidoCardResult = await pool.query(
       `SELECT c.id, c.title, l.board_id FROM cards c
        JOIN lists l ON c.list_id = l.id
        WHERE l.board_id = ${PEDIDOS_BOARD_ID} AND (${placeholders})
        LIMIT 1`,
-      numbers
+      numbers.map(n => `${n}%`)
     );
 
     if (pedidoCardResult.rows.length > 0) {
@@ -238,13 +238,13 @@ export class ImapService {
 
               const cardNames = matchResult.cards.map(c => c.cardTitle).join(', ');
               console.log(`✅ [IMAP] Email UID ${uid} → Pedido ${matchResult.pedidoNumber} → ${matchResult.cards.length} tarjeta(s): ${cardNames}`);
+
+              // Solo marcar como leído si hubo match
+              await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
             } else {
               unmatched.push(email);
-              console.log(`⚠️ [IMAP] Email UID ${uid} sin match: "${email.subject}"`);
+              console.log(`⚠️ [IMAP] Email UID ${uid} sin match: "${email.subject}" — se deja como no leído`);
             }
-
-            // Marcar como leído
-            await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
           } catch (msgError: any) {
             errors.push(`Error procesando UID ${uid}: ${msgError.message}`);
             console.error(`❌ [IMAP] Error procesando UID ${uid}:`, msgError.message);

@@ -121,7 +121,7 @@ async function fetchPedidosFromERP(): Promise<PedidoERP[]> {
         pediprov.estado,
         pediprov.numotr
       FROM pediprov
-      WHERE pediprov.numalm = 1
+      WHERE pediprov.numalm IN (1, 2)
         AND pediprov.numemp = 2
         AND pediprov.fecped >= DATEADD(month, -2, GETDATE())
     `);
@@ -174,7 +174,7 @@ async function fetchOrdenesTrabajoFromERP(): Promise<OrdenTrabajoERP[]> {
 // ================================
 // Servicio de Sincronización
 // ================================
-class SyncService {
+export class SyncService {
   private static syncing = false;
 
   static async requestSync(): Promise<{ success: boolean; message: string; count?: number }> {
