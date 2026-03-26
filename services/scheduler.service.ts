@@ -3,7 +3,7 @@ import { SyncService } from '../helpers/sync.helper';
 import { ImapService } from './imap.service';
 
 const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutos
-const SYSTEM_USER_ID = 1; // Usuario "Taller Osmos" para comentarios automáticos
+const SYSTEM_USER_ID = 56; // Usuario "Notificaciones Osmos" para comentarios automáticos
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
