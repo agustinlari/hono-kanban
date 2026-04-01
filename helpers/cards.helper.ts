@@ -1482,7 +1482,7 @@ class CardService {
       }
 
       query += `
-        GROUP BY c.id, l.title, l.board_id, b.name, b.badge_settings, p.id, p.nombre_proyecto, p.codigo, p.cod_integracion, p.mercado, p.cadena, p.inmueble, p.sup_alq, p.ciudad, p.descripcion, p.bt_solicitud, p.inicio_obra_prevista, p.inicio_obra_real, p.apert_espacio_prevista, p.presupuesto, p.es_bim, p.numero_obra_osmos, p.activo
+        GROUP BY c.id, l.title, l.board_id, b.name, b.badge_settings, ot.id, ot.numano, ot.numotr, ot.descripcion, p.id, p.nombre_proyecto, p.codigo, p.cod_integracion, p.mercado, p.cadena, p.inmueble, p.sup_alq, p.ciudad, p.descripcion, p.bt_solicitud, p.inicio_obra_prevista, p.inicio_obra_real, p.apert_espacio_prevista, p.presupuesto, p.es_bim, p.numero_obra_osmos, p.activo
         ORDER BY c.id DESC
         LIMIT 100
       `;
