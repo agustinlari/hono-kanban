@@ -7,7 +7,6 @@ import path from 'path'; // Importa 'path'
 import type { Variables } from '../types';
 
 // Importa todos tus helpers de rutas
-import { authRoutes } from '../helpers/auth.helper';
 import { archivoRoutes } from '../helpers/archivosHelper';
 import { boardRoutes } from '../helpers/boards.helper';
 import { listRoutes } from '../helpers/lists.helper';
@@ -83,7 +82,6 @@ routes.route('/', syncRoutes);
 
 // IMPORTANTE: keycloakAuthRoutes después para evitar conflictos de rutas
 routes.route('/', keycloakAuthRoutes);
-routes.route('/', authRoutes);
 routes.route('/', archivoRoutes);
 routes.route('/', boardRoutes);
 routes.route('/', listRoutes);
